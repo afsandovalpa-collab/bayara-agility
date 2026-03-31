@@ -76,6 +76,92 @@ function useRealtimeKey(key, defaultVal, onUpdate) {
   }, [key]);
 }
 
+
+// ── Badges ───────────────────────────────────────────────────────
+const BADGE_DEFS = [
+  { id: "first_month",   icon: "🐾", name: "Primer paso",    desc: "Asistencia perfecta un mes completo" },
+  { id: "ten_sats",      icon: "🏅", name: "Veterano",       desc: "10 sábados acumulados" },
+  { id: "turn_done",     icon: "⏰", name: "Dueño del turno",desc: "Completar tu turno de horas extra" },
+  { id: "join_extra",    icon: "🤝", name: "Compañero",      desc: "Apuntarse a una sesión extra ajena" },
+  { id: "streak_3",      icon: "🔥", name: "En racha",       desc: "3 meses seguidos sin faltar ningún sábado" },
+  { id: "fifty_hours",   icon: "⭐", name: "Élite",          desc: "50 horas acumuladas" },
+];
+
+function calcBadges(memberId, allHistory, members) {
+  const earned = { first_month: 0, ten_sats: 0, turn_done: 0, join_extra: 0, streak_3: 0, fifty_hours: 0 };
+  const monthKeys = Object.keys(allHistory).sort();
+  let totalSats = 0;
+  let totalHours = 0;
+  let streakCount = 0;
+
+  monthKeys.forEach(key => {
+    const d = allHistory[key];
+    if (!d) return;
+    const sats = d.sats ?? [];
+    const compDays = d.compDays ?? {};
+    const attend = d.attend ?? {};
+    const extraSessions = d.extraSessions ?? [];
+    const extraTurnIdx = d.extraTurnIdx ?? 0;
+    const transfers = d.transfers ?? [];
+
+    const trainingSats = sats.filter(s => !compDays[s]);
+
+    // Count attended sats for this member (accounting for transfers received)
+    const attendedThisMonth = trainingSats.filter(sat => {
+      // Check if memberId effectively attended (either directly or via transfer received)
+      const directlyConfirmed = !!attend[`${memberId}-${sat}`];
+      const transferFrom = transfers.find(t => t.to === memberId && t.sat === sat);
+      const transferredFrom = transferFrom && !!attend[`${transferFrom.from}-${sat}`];
+      const transferredAway = transfers.find(t => t.from === memberId && t.sat === sat);
+      return (directlyConfirmed || transferredFrom) && !transferredAway;
+    });
+
+    totalSats += attendedThisMonth.length;
+    totalHours += attendedThisMonth.length * 2;
+
+    // Extra sessions hours
+    extraSessions.forEach(sess => {
+      if (sess.attendees.includes(memberId)) totalHours += sess.hours;
+    });
+
+    // 🐾 first_month: attended ALL training sats this month
+    if (trainingSats.length > 0 && attendedThisMonth.length === trainingSats.length) {
+      earned.first_month++;
+    }
+
+    // ⏰ turn_done: this member had the extra turn and there were extra sessions
+    const turnMember = members[extraTurnIdx];
+    if (turnMember?.id === memberId && extraSessions.length > 0) {
+      earned.turn_done++;
+    }
+
+    // 🤝 join_extra: joined someone else's extra session
+    extraSessions.forEach(sess => {
+      const turnId = members[extraTurnIdx]?.id;
+      if (sess.attendees.includes(memberId) && turnId !== memberId) {
+        earned.join_extra++;
+      }
+    });
+
+    // 🔥 streak: track consecutive months with perfect attendance
+    if (trainingSats.length > 0 && attendedThisMonth.length === trainingSats.length) {
+      streakCount++;
+      if (streakCount >= 3) earned.streak_3 = Math.floor(streakCount / 3);
+    } else {
+      streakCount = 0;
+    }
+  });
+
+  // 🏅 ten_sats: every 10 sats
+  earned.ten_sats = Math.floor(totalSats / 10);
+
+  // ⭐ fifty_hours: every 50 hours
+  earned.fifty_hours = Math.floor(totalHours / 50);
+
+  const total = Object.values(earned).reduce((a, b) => a + b, 0);
+  return { earned, total, totalSats, totalHours: Math.round(totalHours) };
+}
+
 // ── Styles ───────────────────────────────────────────────────────
 const STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
@@ -241,6 +327,20 @@ const STYLES = `
   .af-alert-warn { background:#ff6b4712; color:#ff6b47; border:1px solid #ff6b4730; }
   .af-alert-ok { background:#1F94CC12; color:#1F94CC; border:1px solid #1F94CC30; }
 
+  /* ── Badges ── */
+  .af-badge-card { background:#1a1030; border-radius:14px; padding:14px; border:1px solid #241848; margin-bottom:10px; }
+  .af-badge-icon { font-size:28px; line-height:1; }
+  .af-badge-name { font-weight:700; font-size:13px; color:#ede0f8; }
+  .af-badge-desc { font-size:11px; color:#6a4a8a; margin-top:2px; }
+  .af-badge-count { font-family:'Bebas Neue',sans-serif; font-size:22px; color:#1F94CC; letter-spacing:1px; }
+  .af-badge-locked { opacity:0.3; filter:grayscale(1); }
+  .af-rank-row { display:flex; align-items:center; gap:10px; padding:10px 12px; background:#1a1030; border-radius:12px; margin-bottom:8px; border:1px solid #241848; }
+  .af-rank-pos { font-family:'Bebas Neue',sans-serif; font-size:22px; color:#734092; width:24px; text-align:center; flex-shrink:0; }
+  .af-rank-pos.gold { color:#FFD700; }
+  .af-rank-pos.silver { color:#C0C0C0; }
+  .af-rank-pos.bronze { color:#CD7F32; }
+  .af-rank-total { margin-left:auto; font-family:'Bebas Neue',sans-serif; font-size:20px; color:#1F94CC; }
+
   /* ── Legend ── */
   .af-legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px; }
   .af-legend-item { font-size:11px; color:#8a6aaa; display:flex; align-items:center; gap:5px; }
@@ -270,6 +370,7 @@ export default function AgilyTeam() {
   const [copied, setCopied] = useState(false);
   const [newName, setNewName] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);
+  const [allHistory, setAllHistory] = useState({}); // { "yr-mo": monthData }
 
   // Transfer form
   const [xFrom, setXFrom] = useState("");
@@ -283,6 +384,24 @@ export default function AgilyTeam() {
   const [nsa, setNsa] = useState([]);
 
   const mk = MK(yr, mo);
+
+  // ── Load history for badges ──────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await sb.from("bayara_store").select("key,value").like("key", "ag-%-%" );
+        if (data) {
+          const hist = {};
+          data.forEach(row => {
+            if (/^ag-\d{4}-\d+$/.test(row.key)) {
+              hist[row.key] = JSON.parse(row.value);
+            }
+          });
+          setAllHistory(hist);
+        }
+      } catch {}
+    })();
+  }, []);
 
   // ── Load from Supabase ────────────────────────────────────────
   useEffect(() => {
@@ -339,7 +458,10 @@ export default function AgilyTeam() {
   const persist = async (patch = {}) => {
     const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, ...patch };
     setSyncing(true);
-    try { await dbSet(mk, JSON.stringify(d)); } catch {}
+    try {
+      await dbSet(mk, JSON.stringify(d));
+      setAllHistory(prev => ({ ...prev, [mk]: d }));
+    } catch {}
     setSyncing(false);
   };
 
@@ -1441,16 +1563,103 @@ export default function AgilyTeam() {
         )}
       </div>
 
+
+        {/* ══════════════════ TAB: INSIGNIAS ══════════════════ */}
+        {tab === "insignias" && (
+          <div>
+            <div className="af-stitle">Insignias</div>
+
+            {/* My badges — show only if profile selected */}
+            {myId ? (() => {
+              const { earned, total, totalSats, totalHours } = calcBadges(myId, allHistory, members);
+              return (
+                <div>
+                  {/* Stats summary */}
+                  <div className="af-card" style={{ marginBottom: 12 }}>
+                    <div className="af-card-title">Mis estadísticas históricas</div>
+                    <div className="af-stat-row">
+                      <span className="af-stat-lb">Sábados entrenados</span>
+                      <span className="af-stat-v af-green">{totalSats}</span>
+                    </div>
+                    <div className="af-stat-row">
+                      <span className="af-stat-lb">Horas totales</span>
+                      <span className="af-stat-v af-green">{totalHours}h</span>
+                    </div>
+                    <div className="af-stat-row">
+                      <span className="af-stat-lb">Insignias ganadas</span>
+                      <span className="af-stat-v" style={{ color: "#734092" }}>🏆 {total}</span>
+                    </div>
+                  </div>
+
+                  {/* Badge grid */}
+                  <div className="af-card">
+                    <div className="af-card-title">Mis insignias</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      {BADGE_DEFS.map(b => {
+                        const count = earned[b.id] ?? 0;
+                        return (
+                          <div key={b.id} className={`af-badge-card ${count === 0 ? "af-badge-locked" : ""}`}
+                            style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <span className="af-badge-icon">{b.icon}</span>
+                              {count > 0 && <span className="af-badge-count">×{count}</span>}
+                            </div>
+                            <div className="af-badge-name">{b.name}</div>
+                            <div className="af-badge-desc">{b.desc}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })() : (
+              <div className="af-card">
+                <div className="af-empty">Selecciona tu perfil en "Confirmar" para ver tus insignias</div>
+              </div>
+            )}
+
+            {/* Ranking */}
+            <div className="af-card" style={{ marginTop: 4 }}>
+              <div className="af-card-title">🏆 Ranking del equipo</div>
+              {[...members]
+                .map(m => ({ ...m, ...calcBadges(m.id, allHistory, members) }))
+                .sort((a, b) => b.total - a.total)
+                .map((m, i) => {
+                  const posClass = i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : "";
+                  return (
+                    <div key={m.id} className="af-rank-row"
+                      style={myId === m.id ? { borderColor: "#734092", background: "#1e1040" } : {}}>
+                      <div className={`af-rank-pos ${posClass}`}>{i + 1}</div>
+                      <div className="af-av"
+                        style={{ background: aColor(m.id), width: 30, height: 30, fontSize: 12 }}>
+                        {initials(m.name)}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>{m.name}</div>
+                        <div style={{ fontSize: 11, color: "#6a4a8a" }}>
+                          {BADGE_DEFS.filter(b => (m.earned[b.id] ?? 0) > 0).map(b => b.icon).join(" ") || "Sin insignias aún"}
+                        </div>
+                      </div>
+                      <div className="af-rank-total">🏆 {m.total}</div>
+                    </div>
+                  );
+              })}
+            </div>
+          </div>
+        )}
+
       {syncing && <div className="af-sync">🔄 Sincronizando...</div>}
 
       {/* ════ TAB BAR ════ */}
       <nav className="af-tabs">
         {[
           { id: "inicio", icon: "🏠", label: "Inicio" },
-          { id: "confirmar", icon: "✅", label: "Confirmar" },
+          { id: "confirmar", icon: "✅", label: "Asistir" },
           { id: "turnos", icon: "🔄", label: "Turnos" },
           { id: "extra", icon: "⏰", label: "Horas+" },
           { id: "pagos", icon: "💰", label: "Pagos" },
+          { id: "insignias", icon: "🏆", label: "Logros" },
         ].map((t) => (
           <button
             key={t.id}
