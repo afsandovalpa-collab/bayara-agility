@@ -360,6 +360,7 @@ export default function AgilyTeam() {
   const [transfers, setTransfers] = useState([]);
   const [extraTurnIdx, setExtraTurnIdx] = useState(0);
   const [extraSessions, setExtraSessions] = useState([]);
+  const [freeSessions, setFreeSessions] = useState([]); // horas libres por competencia
 
   // UI state
   const [tab, setTab] = useState("inicio");
@@ -421,12 +422,14 @@ export default function AgilyTeam() {
           setTransfers(d.transfers ?? []);
           setExtraTurnIdx(d.extraTurnIdx ?? 0);
           setExtraSessions(d.extraSessions ?? []);
+          setFreeSessions(d.freeSessions ?? []);
         } else {
           setSats(getSats(yr, mo));
           setCompDays({});
           setAttend({});
           setTransfers([]);
           setExtraSessions([]);
+          setFreeSessions([]);
           setExtraTurnIdx(0);
         }
       } catch {
@@ -447,6 +450,7 @@ export default function AgilyTeam() {
       setTransfers(d.transfers ?? []);
       setExtraTurnIdx(d.extraTurnIdx ?? 0);
       setExtraSessions(d.extraSessions ?? []);
+      setFreeSessions(d.freeSessions ?? []);
     } catch {}
   });
 
@@ -456,7 +460,7 @@ export default function AgilyTeam() {
   });
 
   const persist = async (patch = {}) => {
-    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, ...patch };
+    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, ...patch };
     setSyncing(true);
     try {
       await dbSet(mk, JSON.stringify(d));
@@ -471,8 +475,15 @@ export default function AgilyTeam() {
 
   // ── Calculations ──────────────────────────────────────────────
   const trainingSats = sats.filter((s) => !compDays[s]);
+  const compSats = sats.filter((s) => !!compDays[s]);
   const usedHours = trainingSats.length * HOURS_PER_SAT;
-  const extraHours = Math.max(0, TOTAL_HOURS - usedHours);
+  const totalExtraHours = Math.max(0, TOTAL_HOURS - usedHours);
+  // 2h always belong to turn holder; additional hours from competition are free
+  const TURN_HOURS = 2;
+  const turnHours = Math.min(totalExtraHours, TURN_HOURS);
+  const compFreeHours = Math.max(0, totalExtraHours - TURN_HOURS);
+  // Keep extraHours alias for backward compat in some places
+  const extraHours = turnHours;
 
   const getEffective = (mid, sat) => {
     const t = transfers.find((x) => x.from === mid && x.sat === sat);
@@ -497,27 +508,30 @@ export default function AgilyTeam() {
       const cpp = (CPH * HOURS_PER_SAT) / ats.length;
       ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
     });
-    // Horas extra: se dividen entre asistentes de cada sesión anunciada
-    if (extraHours > 0 && members[extraTurnIdx]) {
+    // Horas del turno (siempre 2h fijas) → titular del turno
+    if (turnHours > 0 && members[extraTurnIdx]) {
       const turnId = members[extraTurnIdx].id;
       if (extraSessions.length === 0) {
-        // Sin sesión anunciada: titular paga todo como garantía
-        if (c[turnId] !== undefined) c[turnId] += extraHours * CPH;
+        if (c[turnId] !== undefined) c[turnId] += turnHours * CPH;
       } else {
-        // Horas cubiertas por sesiones → dividir entre asistentes
         extraSessions.forEach((sess) => {
           const ats = sess.attendees.length > 0 ? sess.attendees : [turnId];
           const cpp = (sess.hours * CPH) / ats.length;
           ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
         });
-        // Horas extra aún sin sesión asignada → titular las carga
         const hoursAssigned = extraSessions.reduce((a, s) => a + s.hours, 0);
-        const hoursUnassigned = Math.max(0, extraHours - hoursAssigned);
+        const hoursUnassigned = Math.max(0, turnHours - hoursAssigned);
         if (hoursUnassigned > 0 && c[turnId] !== undefined) {
           c[turnId] += hoursUnassigned * CPH;
         }
       }
     }
+    // Horas libres por competencia → solo se cobran si alguien anuncia sesión
+    freeSessions.forEach((sess) => {
+      if (!sess.attendees.length) return;
+      const cpp = (sess.hours * CPH) / sess.attendees.length;
+      sess.attendees.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
+    });
     return c;
   };
 
@@ -625,6 +639,31 @@ export default function AgilyTeam() {
     });
     setExtraSessions(next);
     persist({ extraSessions: next });
+  };
+
+  const addFreeSession = () => {
+    if (!nsd || !nsh) return;
+    const s = { id: Date.now().toString(), date: nsd, time: nst, hours: nsh, attendees: myId ? [myId] : [] };
+    const next = [...freeSessions, s];
+    setFreeSessions(next);
+    persist({ freeSessions: next });
+    setNsd(""); setNst(""); setNsh(1);
+  };
+
+  const delFreeSession = (id) => {
+    const next = freeSessions.filter((s) => s.id !== id);
+    setFreeSessions(next);
+    persist({ freeSessions: next });
+  };
+
+  const toggleFreeAttendance = (sessId, memberId) => {
+    const next = freeSessions.map((s) => {
+      if (s.id !== sessId) return s;
+      const already = s.attendees.includes(memberId);
+      return { ...s, attendees: already ? s.attendees.filter((x) => x !== memberId) : [...s.attendees, memberId] };
+    });
+    setFreeSessions(next);
+    persist({ freeSessions: next });
   };
 
   const advanceTurn = () => {
@@ -1217,30 +1256,6 @@ export default function AgilyTeam() {
           <div>
             <div className="af-stitle">Horas Extra</div>
 
-            {/* Turn card */}
-            <div className="af-turn">
-              <div className="af-turn-label">Turno este mes</div>
-              <div className="af-turn-name">{turnMember?.name ?? "—"}</div>
-              <div className="af-turn-sub">{extraHours}h disponibles para usar entre semana</div>
-              {extraHours > 0 && (
-                <div style={{ marginTop: 10, fontSize: 13, color: "#9a7abf" }}>
-                  {extraSessions.length === 0
-                    ? <>Carga <span style={{ color: "#1F94CC", fontWeight: 700 }}>{fmtCOP(extraHours * CPH)}</span> hasta que anuncie sesión</>
-                    : <>Costo final se divide entre asistentes confirmados</>
-                  }
-                </div>
-              )}
-              {adminMode && (
-                <button
-                  className="af-btn af-btn-s"
-                  style={{ marginTop: 14, maxWidth: 220, margin: "14px auto 0" }}
-                  onClick={advanceTurn}
-                >
-                  ↻ Pasar turno al siguiente
-                </button>
-              )}
-            </div>
-
             {/* Stats */}
             <div className="af-card">
               <div className="af-stat-row">
@@ -1252,15 +1267,43 @@ export default function AgilyTeam() {
                 <span className="af-stat-v">{usedHours}h</span>
               </div>
               <div className="af-stat-row">
-                <span className="af-stat-lb">Horas extra disponibles</span>
-                <span className="af-stat-v af-green">{extraHours}h</span>
+                <span className="af-stat-lb">Turno del mes</span>
+                <span className="af-stat-v af-green">{turnHours}h → {turnMember?.name ?? "—"}</span>
               </div>
+              {compFreeHours > 0 && (
+                <div className="af-stat-row">
+                  <span className="af-stat-lb">Libres por competencia</span>
+                  <span className="af-stat-v" style={{ color: "#ff9d47" }}>{compFreeHours}h sin asignar</span>
+                </div>
+              )}
             </div>
 
-            {/* Announced sessions — visible to everyone */}
+            {/* ── SECCIÓN 1: Turno del mes ── */}
+            <div className="af-turn" style={{ marginBottom: 12 }}>
+              <div className="af-turn-label">Turno este mes</div>
+              <div className="af-turn-name">{turnMember?.name ?? "—"}</div>
+              <div className="af-turn-sub">{turnHours}h para usar entre semana</div>
+              {turnHours > 0 && (
+                <div style={{ marginTop: 10, fontSize: 13, color: "#9a7abf" }}>
+                  {extraSessions.length === 0
+                    ? <>Carga <span style={{ color: "#1F94CC", fontWeight: 700 }}>{fmtCOP(turnHours * CPH)}</span> hasta que anuncie sesión</>
+                    : <>Costo dividido entre asistentes confirmados</>
+                  }
+                </div>
+              )}
+              {adminMode && (
+                <button className="af-btn af-btn-s"
+                  style={{ marginTop: 14, maxWidth: 220, margin: "14px auto 0" }}
+                  onClick={advanceTurn}>
+                  ↻ Pasar turno al siguiente
+                </button>
+              )}
+            </div>
+
+            {/* Sessions del turno */}
             {extraSessions.length > 0 && (
               <div className="af-card">
-                <div className="af-card-title">Sesiones anunciadas</div>
+                <div className="af-card-title">Sesiones del turno</div>
                 {extraSessions.map((s) => {
                   const iJoined = myId && s.attendees.includes(myId);
                   const canToggle = myId && !adminMode;
@@ -1268,81 +1311,40 @@ export default function AgilyTeam() {
                   const isEditing = editingSessionId === s.id;
                   return (
                     <div key={s.id} className="af-sess" style={{ marginBottom: 12 }}>
-
-                      {/* View mode */}
-                      {!isEditing && (
+                      {!isEditing ? (
                         <>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <div style={{ flex: 1 }}>
-                              <div className="af-sess-date">📅 {s.date}{s.time ? ` · 🕐 ${s.time}` : ""} — {s.hours}h</div>
-                              <div className="af-sess-meta" style={{ marginTop: 6 }}>
-                                <span style={{ color: "#8a6aaa" }}>Van ({s.attendees.length}): </span>
-                                {s.attendees.length > 0
-                                  ? s.attendees.map((id) => (
-                                      <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}>
-                                        <span style={{
-                                          display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                          width: 20, height: 20, borderRadius: "50%",
-                                          background: aColor(id), fontSize: 9, fontWeight: 800, color: "#fff"
-                                        }}>{initials(mn(id))}</span>
-                                        <span style={{ fontSize: 12 }}>{firstName(id)}</span>
-                                      </span>
-                                    ))
-                                  : <span style={{ color: "#4a2e6a" }}>nadie aún</span>
-                                }
-                              </div>
-                              {s.attendees.length > 0 && (
-                                <div className="af-sess-meta" style={{ marginTop: 4 }}>
-                                  Costo por persona:{" "}
-                                  <span style={{ color: "#1F94CC", fontWeight: 700 }}>
-                                    {fmtCOP((s.hours * CPH) / s.attendees.length)}
-                                  </span>
-                                  <span style={{ color: "#4a2e6a" }}> · Total sesión: {fmtCOP(s.hours * CPH)}</span>
-                                </div>
-                              )}
+                          <div style={{ flex: 1 }}>
+                            <div className="af-sess-date">📅 {s.date}{s.time ? ` · 🕐 ${s.time}` : ""} — {s.hours}h</div>
+                            <div className="af-sess-meta" style={{ marginTop: 6 }}>
+                              <span style={{ color: "#8a6aaa" }}>Van ({s.attendees.length}): </span>
+                              {s.attendees.length > 0
+                                ? s.attendees.map((id) => (
+                                    <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}>
+                                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: "50%", background: aColor(id), fontSize: 9, fontWeight: 800, color: "#fff" }}>{initials(mn(id))}</span>
+                                      <span style={{ fontSize: 12 }}>{firstName(id)}</span>
+                                    </span>))
+                                : <span style={{ color: "#4a2e6a" }}>nadie aún</span>}
                             </div>
+                            {s.attendees.length > 0 && (
+                              <div className="af-sess-meta" style={{ marginTop: 4 }}>
+                                Costo/persona: <span style={{ color: "#1F94CC", fontWeight: 700 }}>{fmtCOP((s.hours * CPH) / s.attendees.length)}</span>
+                              </div>
+                            )}
                           </div>
-
-                          {/* Action buttons row */}
                           <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                             {canToggle && (
-                              <button
-                                className={`af-btn ${iJoined ? "af-btn-d" : "af-btn-p"}`}
+                              <button className={`af-btn ${iJoined ? "af-btn-d" : "af-btn-p"}`}
                                 style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: 1 }}
-                                onClick={() => toggleExtraAttendance(s.id, myId)}
-                              >
+                                onClick={() => toggleExtraAttendance(s.id, myId)}>
                                 {iJoined ? "✕ No puedo" : "✓ Me apunto"}
                               </button>
                             )}
-                            {canEdit && (
-                              <button
-                                className="af-btn af-btn-s"
-                                style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: "0 0 auto" }}
-                                onClick={() => startEditing(s)}
-                              >
-                                ✏️
-                              </button>
-                            )}
-                            {canEdit && (
-                              <button
-                                className="af-btn af-btn-d"
-                                style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: "0 0 auto" }}
-                                onClick={() => delSession(s.id)}
-                              >
-                                🗑
-                              </button>
-                            )}
+                            {canEdit && <button className="af-btn af-btn-s" style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: "0 0 auto" }} onClick={() => startEditing(s)}>✏️</button>}
+                            {canEdit && <button className="af-btn af-btn-d" style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: "0 0 auto" }} onClick={() => delSession(s.id)}>🗑</button>}
                           </div>
-                          {!myId && !adminMode && (
-                            <div style={{ fontSize: 12, color: "#6a4a8a", marginTop: 8 }}>
-                              Selecciona tu perfil en "Confirmar" para apuntarte
-                            </div>
-                          )}
+                          {!myId && !adminMode && <div style={{ fontSize: 12, color: "#6a4a8a", marginTop: 8 }}>Selecciona tu perfil para apuntarte</div>}
                         </>
-                      )}
-
-                      {/* Edit mode */}
-                      {isEditing && (
+                      ) : (
                         <>
                           <div className="af-card-title" style={{ marginBottom: 10 }}>✏️ Editando sesión</div>
                           <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Fecha</div>
@@ -1351,79 +1353,135 @@ export default function AgilyTeam() {
                           <input type="time" className="af-inp af-mb8" value={nst} onChange={(e) => setNst(e.target.value)} />
                           <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Horas a usar</div>
                           <select className="af-inp af-mb12" value={nsh} onChange={(e) => setNsh(Number(e.target.value))}>
-                            {Array.from({ length: extraHours }, (_, i) => i + 1).map((h) => (
+                            {Array.from({ length: turnHours }, (_, i) => i + 1).map((h) => (
                               <option key={h} value={h}>{h} hora{h > 1 ? "s" : ""}</option>
                             ))}
                           </select>
                           <div style={{ display: "flex", gap: 8 }}>
-                            <button className="af-btn af-btn-p" style={{ fontSize: 12, padding: "8px 14px" }} onClick={saveEditedSession}>
-                              ✓ Guardar
-                            </button>
-                            <button className="af-btn af-btn-s" style={{ fontSize: 12, padding: "8px 14px", width: "auto", flex: "0 0 auto" }} onClick={cancelEditing}>
-                              Cancelar
-                            </button>
+                            <button className="af-btn af-btn-p" style={{ fontSize: 12, padding: "8px 14px" }} onClick={saveEditedSession}>✓ Guardar</button>
+                            <button className="af-btn af-btn-s" style={{ fontSize: 12, padding: "8px 14px", width: "auto", flex: "0 0 auto" }} onClick={cancelEditing}>Cancelar</button>
                           </div>
                         </>
                       )}
-
                     </div>
                   );
                 })}
               </div>
             )}
 
-            {/* Announce form — only turn holder */}
-            {extraHours === 0 ? (
+            {/* Announce form turno */}
+            {turnHours > 0 && (adminMode || isMyTurn) && (
               <div className="af-card">
-                <div className="af-empty">Todas las horas están cubiertas por los sábados este mes.</div>
-              </div>
-            ) : (adminMode || isMyTurn) ? (
-              <div className="af-card">
-                <div className="af-card-title">
-                  {isMyTurn && !adminMode ? "🎯 Es tu turno — anuncia la sesión" : "Anunciar sesión"}
-                </div>
-                <p className="af-note af-mb12">
-                  Elige fecha y horas. El resto del equipo podrá apuntarse desde sus perfiles.
-                </p>
+                <div className="af-card-title">{isMyTurn && !adminMode ? "🎯 Es tu turno — anuncia la sesión" : "Anunciar sesión del turno"}</div>
                 <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Fecha</div>
-                <input
-                  type="date"
-                  className="af-inp af-mb8"
-                  value={nsd}
-                  onChange={(e) => setNsd(e.target.value)}
-                />
+                <input type="date" className="af-inp af-mb8" value={nsd} onChange={(e) => setNsd(e.target.value)} />
                 <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Hora de inicio</div>
-                <input
-                  type="time"
-                  className="af-inp af-mb8"
-                  value={nst}
-                  onChange={(e) => setNst(e.target.value)}
-                />
+                <input type="time" className="af-inp af-mb8" value={nst} onChange={(e) => setNst(e.target.value)} />
                 <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Horas a usar</div>
-                <select
-                  className="af-inp af-mb12"
-                  value={nsh}
-                  onChange={(e) => setNsh(Number(e.target.value))}
-                >
-                  {Array.from({ length: extraHours }, (_, i) => i + 1).map((h) => (
+                <select className="af-inp af-mb12" value={nsh} onChange={(e) => setNsh(Number(e.target.value))}>
+                  {Array.from({ length: turnHours }, (_, i) => i + 1).map((h) => (
                     <option key={h} value={h}>{h} hora{h > 1 ? "s" : ""}</option>
                   ))}
                 </select>
-                <button
-                  className="af-btn af-btn-p"
-                  onClick={addExtraSession}
-                  disabled={!nsd}
-                >
-                  📢 Anunciar sesión al equipo
-                </button>
+                <button className="af-btn af-btn-p" onClick={addExtraSession} disabled={!nsd}>📢 Anunciar al equipo</button>
               </div>
-            ) : (
+            )}
+            {turnHours > 0 && !adminMode && !isMyTurn && extraSessions.length === 0 && (
               <div className="af-card">
                 <div className="af-empty">
-                  <strong style={{ color: "#1F94CC" }}>{turnMember?.name}</strong> aún no ha anunciado la sesión.{" "}
-                  {!myId ? "Selecciona tu perfil para apuntarte cuando la anuncie." : "Te avisaremos aquí cuando esté disponible."}
+                  <strong style={{ color: "#1F94CC" }}>{turnMember?.name}</strong> aún no ha anunciado la sesión.
                 </div>
               </div>
+            )}
+
+            {/* ── SECCIÓN 2: Horas libres por competencia ── */}
+            {compFreeHours > 0 && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px" }}>
+                  <div style={{ flex: 1, height: 1, background: "#241848" }} />
+                  <span style={{ fontSize: 11, color: "#ff9d47", fontWeight: 700, letterSpacing: "0.8px", textTransform: "uppercase" }}>
+                    🏆 {compFreeHours}h libres por competencia
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: "#241848" }} />
+                </div>
+
+                <div className="af-card">
+                  <div className="af-card-title">¿Qué son estas horas?</div>
+                  <p className="af-note">
+                    Hay <strong style={{ color: "#ff9d47" }}>{compSats.length} sábado{compSats.length > 1 ? "s" : ""} de competencia</strong> este mes ({compSats.map(shortDate).join(", ")}),
+                    lo que libera <strong style={{ color: "#ff9d47" }}>{compFreeHours}h</strong> adicionales.
+                    Estas horas <strong>no están asignadas a nadie</strong> — cualquier integrante puede reclamarlas anunciando una sesión.
+                    El costo se divide entre quienes asistan.
+                  </p>
+                </div>
+
+                {/* Free sessions announced */}
+                {freeSessions.length > 0 && (
+                  <div className="af-card">
+                    <div className="af-card-title">Sesiones libres anunciadas</div>
+                    {freeSessions.map((s) => {
+                      const iJoined = myId && s.attendees.includes(myId);
+                      const canToggle = myId && !adminMode;
+                      const canEdit = adminMode || (myId && s.attendees[0] === myId);
+                      return (
+                        <div key={s.id} className="af-sess" style={{ marginBottom: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <div className="af-sess-date">📅 {s.date}{s.time ? ` · 🕐 ${s.time}` : ""} — {s.hours}h</div>
+                            <div className="af-sess-meta" style={{ marginTop: 6 }}>
+                              <span style={{ color: "#8a6aaa" }}>Van ({s.attendees.length}): </span>
+                              {s.attendees.length > 0
+                                ? s.attendees.map((id) => (
+                                    <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}>
+                                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: "50%", background: aColor(id), fontSize: 9, fontWeight: 800, color: "#fff" }}>{initials(mn(id))}</span>
+                                      <span style={{ fontSize: 12 }}>{firstName(id)}</span>
+                                    </span>))
+                                : <span style={{ color: "#4a2e6a" }}>nadie aún</span>}
+                            </div>
+                            {s.attendees.length > 0 && (
+                              <div className="af-sess-meta" style={{ marginTop: 4 }}>
+                                Costo/persona: <span style={{ color: "#ff9d47", fontWeight: 700 }}>{fmtCOP((s.hours * CPH) / s.attendees.length)}</span>
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+                            {canToggle && (
+                              <button className={`af-btn ${iJoined ? "af-btn-d" : "af-btn-p"}`}
+                                style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: 1 }}
+                                onClick={() => toggleFreeAttendance(s.id, myId)}>
+                                {iJoined ? "✕ No puedo" : "✓ Me apunto"}
+                              </button>
+                            )}
+                            {canEdit && <button className="af-btn af-btn-d" style={{ fontSize: 12, padding: "7px 12px", width: "auto", flex: "0 0 auto" }} onClick={() => delFreeSession(s.id)}>🗑</button>}
+                          </div>
+                          {!myId && !adminMode && <div style={{ fontSize: 12, color: "#6a4a8a", marginTop: 8 }}>Selecciona tu perfil para apuntarte</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Announce free session — anyone with a profile */}
+                {(adminMode || myId) && (
+                  <div className="af-card">
+                    <div className="af-card-title">📣 Reclamar horas libres</div>
+                    <p className="af-note af-mb12">Cualquier integrante puede anunciar una sesión con estas horas. El costo se divide entre quienes confirmen.</p>
+                    <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Fecha</div>
+                    <input type="date" className="af-inp af-mb8" value={nsd} onChange={(e) => setNsd(e.target.value)} />
+                    <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Hora de inicio</div>
+                    <input type="time" className="af-inp af-mb8" value={nst} onChange={(e) => setNst(e.target.value)} />
+                    <div className="af-note af-mb8" style={{ color: "#8a6aaa" }}>Horas a usar</div>
+                    <select className="af-inp af-mb12" value={nsh} onChange={(e) => setNsh(Number(e.target.value))}>
+                      {Array.from({ length: compFreeHours }, (_, i) => i + 1).map((h) => (
+                        <option key={h} value={h}>{h} hora{h > 1 ? "s" : ""}</option>
+                      ))}
+                    </select>
+                    <button className="af-btn af-btn-p" style={{ background: "linear-gradient(135deg,#ff9d47,#ff6b47)" }}
+                      onClick={addFreeSession} disabled={!nsd}>
+                      📢 Anunciar sesión libre
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
