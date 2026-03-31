@@ -1,12 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ── Supabase ─────────────────────────────────────────────────────
+const SUPABASE_URL = "https://kbplcsmljknzgoamkkoo.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImticGxjc21samtuemdvYW1ra29vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MjM5NjQsImV4cCI6MjA5MDQ5OTk2NH0.7lLvqAtrovESJjUosDiFKHMQ9dTynCY58VKsvs8AblQ";
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Inject Google Fonts ──────────────────────────────────────────
 if (typeof document !== "undefined" && !document.getElementById("af-gf")) {
   const l = document.createElement("link");
   l.id = "af-gf";
   l.rel = "stylesheet";
-  l.href =
-    "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap";
+  l.href = "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap";
   document.head.appendChild(l);
 }
 
@@ -17,7 +22,7 @@ const LOGO_IMG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QCMRXhpZgA
 const TOTAL_COST = 450000;
 const HOURS_PER_SAT = 2;
 const TOTAL_HOURS = 10;
-const CPH = TOTAL_COST / TOTAL_HOURS; // $45,000/h
+const CPH = TOTAL_COST / TOTAL_HOURS;
 
 const DEMO_MEMBERS = [
   { id: "m1", name: "Andrés" },
@@ -33,8 +38,7 @@ const DEMO_MEMBERS = [
 
 // ── Helpers ──────────────────────────────────────────────────────
 const getSats = (y, m) => {
-  const r = [],
-    d = new Date(y, m, 1);
+  const r = [], d = new Date(y, m, 1);
   while (d.getDay() !== 6) d.setDate(d.getDate() + 1);
   while (d.getMonth() === m) {
     r.push(new Date(d).toISOString().split("T")[0]);
@@ -43,29 +47,34 @@ const getSats = (y, m) => {
   return r;
 };
 const fmtCOP = (n) => `$${Math.round(n).toLocaleString("es-CO")}`;
-const shortDate = (s) =>
-  new Date(s + "T12:00:00").toLocaleDateString("es-CO", {
-    day: "numeric",
-    month: "short",
-  });
-const monthStr = (y, m) =>
-  new Date(y, m, 1).toLocaleDateString("es-CO", {
-    month: "long",
-    year: "numeric",
-  });
-const initials = (n) =>
-  n
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-const AVATAR_COLORS = [
-  "#734092","#1F94CC","#a0509e","#1a7ab0","#5a2878","#0d6a9e","#8a30a0","#2260a0",
-];
+const shortDate = (s) => new Date(s + "T12:00:00").toLocaleDateString("es-CO", { day: "numeric", month: "short" });
+const monthStr = (y, m) => new Date(y, m, 1).toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+const initials = (n) => n.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+const AVATAR_COLORS = ["#734092","#1F94CC","#a0509e","#1a7ab0","#5a2878","#0d6a9e","#8a30a0","#2260a0"];
 const aColor = (id) => AVATAR_COLORS[id.charCodeAt(id.length - 1) % AVATAR_COLORS.length];
 
+// ── Supabase helpers ─────────────────────────────────────────────
+const MK = (yr, mo) => `ag-${yr}-${mo}`;
 
+async function dbGet(key) {
+  const { data } = await sb.from("bayara_store").select("value").eq("key", key).single();
+  return data ? data.value : null;
+}
+
+async function dbSet(key, value) {
+  await sb.from("bayara_store").upsert({ key, value }, { onConflict: "key" });
+}
+
+function useRealtimeKey(key, defaultVal, onUpdate) {
+  useEffect(() => {
+    if (!key) return;
+    const ch = sb.channel(`realtime:${key}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "bayara_store", filter: `key=eq.${key}` },
+        (payload) => { onUpdate(payload.new?.value ?? defaultVal); }
+      ).subscribe();
+    return () => { sb.removeChannel(ch); };
+  }, [key]);
+}
 
 // ── Styles ───────────────────────────────────────────────────────
 const STYLES = `
@@ -84,6 +93,8 @@ const STYLES = `
   .af-hdr-right { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
   .af-admin-btn { padding:5px 12px; border-radius:20px; border:1px solid #2e1e50; background:transparent; color:#8a6aaa; font-family:'DM Sans',sans-serif; font-size:11px; font-weight:700; cursor:pointer; letter-spacing:0.5px; transition:all 0.2s; }
   .af-admin-btn.on { background:#1F94CC; border-color:#1F94CC; color:#fff; }
+  .af-sync { position:fixed; bottom:82px; right:12px; background:#1F94CC; color:#fff; font-size:11px; font-family:'DM Sans',sans-serif; font-weight:700; padding:5px 12px; border-radius:20px; z-index:200; letter-spacing:0.5px; box-shadow:0 2px 10px #1F94CC50; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
   .af-myid-info { font-size:11px; color:#8a6aaa; display:flex; align-items:center; gap:6px; }
   .af-myid-change { background:none; border:none; color:#ff6b47; cursor:pointer; font-size:11px; font-family:'DM Sans',sans-serif; text-decoration:underline; }
 
@@ -255,8 +266,10 @@ export default function AgilyTeam() {
   const [myId, setMyId] = useState(null);
   const [adminMode, setAdminMode] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [newName, setNewName] = useState("");
+  const [editingSessionId, setEditingSessionId] = useState(null);
 
   // Transfer form
   const [xFrom, setXFrom] = useState("");
@@ -268,22 +281,21 @@ export default function AgilyTeam() {
   const [nst, setNst] = useState("");
   const [nsh, setNsh] = useState(1);
   const [nsa, setNsa] = useState([]);
-  const [editingSessionId, setEditingSessionId] = useState(null);
 
-  const mk = `ag3-${yr}-${mo}`;
+  const mk = MK(yr, mo);
 
-  // ── Load from storage ─────────────────────────────────────────
+  // ── Load from Supabase ────────────────────────────────────────
   useEffect(() => {
     setLoaded(false);
     (async () => {
       try {
-        const mr = await (() => { try { const v = localStorage.getItem("ag3-members"); return v ? { value: v } : null; } catch { return null; } })();
-        if (mr?.value) setMembers(JSON.parse(mr.value));
+        const mval = await dbGet("ag-members");
+        if (mval) setMembers(JSON.parse(mval));
       } catch {}
       try {
-        const dr = await (() => { try { const v = localStorage.getItem(mk); return v ? { value: v } : null; } catch { return null; } })();
-        if (dr?.value) {
-          const d = JSON.parse(dr.value);
+        const dval = await dbGet(mk);
+        if (dval) {
+          const d = JSON.parse(dval);
           setSats(d.sats ?? getSats(yr, mo));
           setCompDays(d.compDays ?? {});
           setAttend(d.attend ?? {});
@@ -305,11 +317,35 @@ export default function AgilyTeam() {
     })();
   }, [yr, mo]);
 
-  const persist = (patch = {}) => {
+  // ── Realtime subscriptions ─────────────────────────────────────
+  useRealtimeKey(mk, null, (val) => {
+    if (!val) return;
+    try {
+      const d = JSON.parse(val);
+      setSats(d.sats ?? getSats(yr, mo));
+      setCompDays(d.compDays ?? {});
+      setAttend(d.attend ?? {});
+      setTransfers(d.transfers ?? []);
+      setExtraTurnIdx(d.extraTurnIdx ?? 0);
+      setExtraSessions(d.extraSessions ?? []);
+    } catch {}
+  });
+
+  useRealtimeKey("ag-members", null, (val) => {
+    if (!val) return;
+    try { setMembers(JSON.parse(val)); } catch {}
+  });
+
+  const persist = async (patch = {}) => {
     const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, ...patch };
-    (() => { try { localStorage.setItem(mk, JSON.stringify(d)); } catch {} })();
+    setSyncing(true);
+    try { await dbSet(mk, JSON.stringify(d)); } catch {}
+    setSyncing(false);
   };
-  const pm = (m) => (() => { try { localStorage.setItem("ag3-members", JSON.stringify(m)); } catch {} })();
+
+  const pm = async (m) => {
+    try { await dbSet("ag-members", JSON.stringify(m)); } catch {}
+  };
 
   // ── Calculations ──────────────────────────────────────────────
   const trainingSats = sats.filter((s) => !compDays[s]);
@@ -1404,6 +1440,8 @@ export default function AgilyTeam() {
           </div>
         )}
       </div>
+
+      {syncing && <div className="af-sync">🔄 Sincronizando...</div>}
 
       {/* ════ TAB BAR ════ */}
       <nav className="af-tabs">
