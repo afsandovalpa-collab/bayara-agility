@@ -898,26 +898,41 @@ export default function AgilyTeam() {
                 const isComp = !!compDays[s];
                 const ats = getAttendees(s);
                 return (
-                  <div key={s} className={`af-sat ${isComp ? "cp" : "tr"}`}>
-                    <div className="af-sat-date">{shortDate(s)}</div>
-                    <span className={`af-badge ${isComp ? "cp" : "tr"}`}>
-                      {isComp ? "🏆 Competencia" : "🐕 Entrenamiento"}
-                    </span>
-                    {!isComp && (
-                      <div className="af-sat-meta">
-                        {ats.length}/{members.length}
+                  <div key={s} style={{ marginBottom: 10 }}>
+                    <div className={`af-sat ${isComp ? "cp" : "tr"}`} style={{ marginBottom: ats.length > 0 ? 6 : 0 }}>
+                      <div className="af-sat-date">{shortDate(s)}</div>
+                      <span className={`af-badge ${isComp ? "cp" : "tr"}`}>
+                        {isComp ? "🏆 Competencia" : "🐕 Entrenamiento"}
+                      </span>
+                      {!isComp && (
+                        <div className="af-sat-meta">
+                          {ats.length}/{members.length}
+                        </div>
+                      )}
+                      {adminMode && (
+                        <button
+                          className={`af-toggle ${isComp ? "off" : "on"}`}
+                          onClick={() => toggleComp(s)}
+                          title={isComp ? "Desmarcar competencia" : "Marcar como competencia"}
+                        />
+                      )}
+                    </div>
+                    {!isComp && ats.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, paddingLeft: 8 }}>
+                        {ats.map((id) => (
+                          <div key={id} style={{ display: "flex", alignItems: "center", gap: 4,
+                            background: "#1a1030", border: "1px solid #241848",
+                            borderRadius: 20, padding: "3px 10px 3px 6px" }}>
+                            <div className="af-av" style={{ background: aColor(id), width: 20, height: 20, fontSize: 9 }}>
+                              {initials(mn(id))}
+                            </div>
+                            <span style={{ fontSize: 12, color: "#ede0f8" }}>{firstName(id)}</span>
+                          </div>
+                        ))}
                       </div>
                     )}
-                    {adminMode && (
-                      <button
-                        className={`af-toggle ${isComp ? "off" : "on"}`}
-                        onClick={() => toggleComp(s)}
-                        title={
-                          isComp
-                            ? "Desmarcar competencia"
-                            : "Marcar como competencia"
-                        }
-                      />
+                    {!isComp && ats.length === 0 && (
+                      <div style={{ paddingLeft: 8, fontSize: 12, color: "#4a2e6a" }}>Nadie confirmado aún</div>
                     )}
                   </div>
                 );
@@ -930,7 +945,7 @@ export default function AgilyTeam() {
             </div>
 
             {/* Extra turn */}
-            {extraHours > 0 && (
+            {extraHours > 0 && paymentMode !== "individual" && (
               <div className="af-turn">
                 <div className="af-turn-label">Turno de horas extra</div>
                 <div className="af-turn-hours">{extraHours}h disponibles</div>
