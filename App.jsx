@@ -723,10 +723,10 @@ export default function AgilyTeam() {
           }`
       ),
       ``,
-      extraHours > 0
+      paymentMode === "bronce" && extraHours > 0
         ? `*⏰ Horas extra (${extraHours}h):*\nTurno de: ${members[extraTurnIdx]?.name ?? "-"} (+${fmtCOP(extraHours * CPH)} incluido en su cobro)`
         : null,
-      extraSessions.length > 0
+      paymentMode === "bronce" && extraSessions.length > 0
         ? `\n*Sesiones extra registradas:*\n` +
           extraSessions
             .map(
@@ -736,7 +736,9 @@ export default function AgilyTeam() {
             .join("\n")
         : null,
       ``,
-      `_Total pista: ${fmtCOP(TOTAL_COST)}_`,
+      paymentMode === "bronce"
+        ? `_Total pista: ${fmtCOP(TOTAL_COST)}_`
+        : `_Costo/hora: ${fmtCOP(INDIVIDUAL_CPH)} · Total estimado: ${fmtCOP(trainingSats.length * HOURS_PER_SAT * INDIVIDUAL_CPH)}_`,
     ]
       .filter((l) => l !== null)
       .join("\n");
