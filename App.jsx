@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ── Supabase ─────────────────────────────────────────────────────
-const SUPABASE_URL = "https://kbplcsmljknzgoamkkoo.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImticGxjc21samtuemdvYW1ra29vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MjM5NjQsImV4cCI6MjA5MDQ5OTk2NH0.7lLvqAtrovESJjUosDiFKHMQ9dTynCY58VKsvs8AblQ";
+const SUPABASE_URL = "https://fwcfzeaixedfonrdumex.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3Y2Z6ZWFpeGVkZm9ucmR1bWV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NTY4MzIsImV4cCI6MjA5MzMzMjgzMn0.35CTK4qPCa3XeKeU0rToBExJFcP4MuBJMOa_qwQXuf4";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Inject Google Fonts ──────────────────────────────────────────
