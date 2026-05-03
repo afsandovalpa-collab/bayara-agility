@@ -23,6 +23,7 @@ const TOTAL_COST = 450000;
 const HOURS_PER_SAT = 2;
 const TOTAL_HOURS = 10;
 const CPH = TOTAL_COST / TOTAL_HOURS;
+const INDIVIDUAL_CPH = 50000; // $50,000/h en modo días individuales
 
 const DEMO_MEMBERS = [
   { id: "m1", name: "Andrés" },
@@ -341,6 +342,15 @@ const STYLES = `
   .af-rank-pos.bronze { color:#CD7F32; }
   .af-rank-total { margin-left:auto; font-family:'Bebas Neue',sans-serif; font-size:20px; color:#1F94CC; }
 
+  /* ── Mode selector ── */
+  .af-mode-row { display:flex; gap:8px; margin-bottom:14px; }
+  .af-mode-btn { flex:1; padding:10px 12px; border-radius:12px; border:2px solid #2e1e50; background:#131020; color:#9a7abf; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:700; cursor:pointer; transition:all 0.2s; text-align:center; }
+  .af-mode-btn.active-bronce { background:#73409215; border-color:#734092; color:#734092; }
+  .af-mode-btn.active-individual { background:#1F94CC15; border-color:#1F94CC; color:#1F94CC; }
+  .af-mode-tag { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:6px; letter-spacing:0.5px; }
+  .af-mode-tag-bronce { background:#73409220; color:#734092; border:1px solid #73409240; }
+  .af-mode-tag-individual { background:#1F94CC20; color:#1F94CC; border:1px solid #1F94CC40; }
+
   /* ── Legend ── */
   .af-legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px; }
   .af-legend-item { font-size:11px; color:#8a6aaa; display:flex; align-items:center; gap:5px; }
@@ -372,6 +382,7 @@ export default function AgilyTeam() {
   const [newName, setNewName] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [allHistory, setAllHistory] = useState({}); // { "yr-mo": monthData }
+  const [paymentMode, setPaymentMode] = useState("bronce"); // "bronce" | "individual"
 
   // Transfer form
   const [xFrom, setXFrom] = useState("");
@@ -423,6 +434,7 @@ export default function AgilyTeam() {
           setExtraTurnIdx(d.extraTurnIdx ?? 0);
           setExtraSessions(d.extraSessions ?? []);
           setFreeSessions(d.freeSessions ?? []);
+          setPaymentMode(d.paymentMode ?? "bronce");
         } else {
           setSats(getSats(yr, mo));
           setCompDays({});
@@ -431,6 +443,7 @@ export default function AgilyTeam() {
           setExtraSessions([]);
           setFreeSessions([]);
           setExtraTurnIdx(0);
+          setPaymentMode("bronce");
         }
       } catch {
         setSats(getSats(yr, mo));
@@ -451,6 +464,7 @@ export default function AgilyTeam() {
       setExtraTurnIdx(d.extraTurnIdx ?? 0);
       setExtraSessions(d.extraSessions ?? []);
       setFreeSessions(d.freeSessions ?? []);
+      setPaymentMode(d.paymentMode ?? "bronce");
     } catch {}
   });
 
@@ -460,7 +474,7 @@ export default function AgilyTeam() {
   });
 
   const persist = async (patch = {}) => {
-    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, ...patch };
+    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, paymentMode, ...patch };
     setSyncing(true);
     try {
       await dbSet(mk, JSON.stringify(d));
@@ -501,37 +515,48 @@ export default function AgilyTeam() {
   const calcCosts = () => {
     const c = {};
     members.forEach((m) => (c[m.id] = 0));
-    // Sábados de entrenamiento
-    trainingSats.forEach((sat) => {
-      const ats = getAttendees(sat);
-      if (!ats.length) return;
-      const cpp = (CPH * HOURS_PER_SAT) / ats.length;
-      ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
-    });
-    // Horas del turno (siempre 2h fijas) → titular del turno
-    if (turnHours > 0 && members[extraTurnIdx]) {
-      const turnId = members[extraTurnIdx].id;
-      if (extraSessions.length === 0) {
-        if (c[turnId] !== undefined) c[turnId] += turnHours * CPH;
-      } else {
-        extraSessions.forEach((sess) => {
-          const ats = sess.attendees.length > 0 ? sess.attendees : [turnId];
-          const cpp = (sess.hours * CPH) / ats.length;
-          ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
-        });
-        const hoursAssigned = extraSessions.reduce((a, s) => a + s.hours, 0);
-        const hoursUnassigned = Math.max(0, turnHours - hoursAssigned);
-        if (hoursUnassigned > 0 && c[turnId] !== undefined) {
-          c[turnId] += hoursUnassigned * CPH;
+
+    if (paymentMode === "individual") {
+      // Modo días individuales: $50,000/h, solo sábados con asistentes, sin turno ni extras
+      trainingSats.forEach((sat) => {
+        const ats = getAttendees(sat);
+        if (!ats.length) return;
+        const cpp = (INDIVIDUAL_CPH * HOURS_PER_SAT) / ats.length;
+        ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
+      });
+    } else {
+      // Modo Paquete Bronce: $450,000 fijos / 10h
+      trainingSats.forEach((sat) => {
+        const ats = getAttendees(sat);
+        if (!ats.length) return;
+        const cpp = (CPH * HOURS_PER_SAT) / ats.length;
+        ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
+      });
+      // Horas del turno (2h fijas) → titular
+      if (turnHours > 0 && members[extraTurnIdx]) {
+        const turnId = members[extraTurnIdx].id;
+        if (extraSessions.length === 0) {
+          if (c[turnId] !== undefined) c[turnId] += turnHours * CPH;
+        } else {
+          extraSessions.forEach((sess) => {
+            const ats = sess.attendees.length > 0 ? sess.attendees : [turnId];
+            const cpp = (sess.hours * CPH) / ats.length;
+            ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
+          });
+          const hoursAssigned = extraSessions.reduce((a, s) => a + s.hours, 0);
+          const hoursUnassigned = Math.max(0, turnHours - hoursAssigned);
+          if (hoursUnassigned > 0 && c[turnId] !== undefined) {
+            c[turnId] += hoursUnassigned * CPH;
+          }
         }
       }
+      // Horas libres por competencia → solo si alguien las reclama
+      freeSessions.forEach((sess) => {
+        if (!sess.attendees.length) return;
+        const cpp = (sess.hours * CPH) / sess.attendees.length;
+        sess.attendees.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
+      });
     }
-    // Horas libres por competencia → solo se cobran si alguien anuncia sesión
-    freeSessions.forEach((sess) => {
-      if (!sess.attendees.length) return;
-      const cpp = (sess.hours * CPH) / sess.attendees.length;
-      sess.attendees.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
-    });
     return c;
   };
 
@@ -681,6 +706,7 @@ export default function AgilyTeam() {
       .sort((a, b) => costs[b.id] - costs[a.id]);
     return [
       `🐕 *BAYARA — AGILITY*`,
+      `💳 Modo: ${paymentMode === "bronce" ? "🥉 Paquete Bronce" : "📅 Días individuales"}`,
       `📅 ${monthStr(yr, mo).toUpperCase()}`,
       `━━━━━━━━━━━━━━━━━━━━`,
       ``,
@@ -810,24 +836,58 @@ export default function AgilyTeam() {
               <button className="af-mon-nav-btn" onClick={nextMonth}>›</button>
             </div>
 
+            {/* Mode selector — admin only */}
+            {adminMode && (
+              <div className="af-card" style={{ marginBottom: 12 }}>
+                <div className="af-card-title">Modo de pago del mes</div>
+                <div className="af-mode-row">
+                  <button
+                    className={`af-mode-btn ${paymentMode === "bronce" ? "active-bronce" : ""}`}
+                    onClick={() => { setPaymentMode("bronce"); persist({ paymentMode: "bronce" }); }}
+                  >
+                    🥉 Paquete Bronce<br/>
+                    <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>$450.000 · 10h · con turno</span>
+                  </button>
+                  <button
+                    className={`af-mode-btn ${paymentMode === "individual" ? "active-individual" : ""}`}
+                    onClick={() => { setPaymentMode("individual"); persist({ paymentMode: "individual" }); }}
+                  >
+                    📅 Días individuales<br/>
+                    <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>${fmtCOP(INDIVIDUAL_CPH)}/h · sin turno</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Hero */}
             <div className="af-hero">
-              <div className="af-hero-lb">Costo total del mes</div>
-              <div className="af-hero-v">{fmtCOP(TOTAL_COST)}</div>
+              <div className="af-hero-lb">
+                {paymentMode === "bronce" ? "Paquete Bronce · Costo total" : "Días individuales · Costo estimado"}
+                <span className={`af-mode-tag ${paymentMode === "bronce" ? "af-mode-tag-bronce" : "af-mode-tag-individual"}`}>
+                  {paymentMode === "bronce" ? "🥉 Bronce" : "📅 Individual"}
+                </span>
+              </div>
+              <div className="af-hero-v">
+                {paymentMode === "bronce" ? fmtCOP(TOTAL_COST) : fmtCOP(trainingSats.length * HOURS_PER_SAT * INDIVIDUAL_CPH)}
+              </div>
               <div className="af-hero-sub">
-                {trainingSats.length} sábados de entrenamiento · {extraHours}h
-                disponibles extra
+                {paymentMode === "bronce"
+                  ? `${trainingSats.length} sábados · ${extraHours}h extras disponibles`
+                  : `${trainingSats.length} sábados · ${fmtCOP(INDIVIDUAL_CPH)}/h`
+                }
               </div>
               <div className="af-prog">
                 <div
                   className="af-prog-f"
                   style={{
-                    width: `${Math.min(100, (totalUsed / TOTAL_COST) * 100)}%`,
+                    width: paymentMode === "bronce"
+                      ? `${Math.min(100, (totalUsed / TOTAL_COST) * 100)}%`
+                      : `${Math.min(100, (totalUsed / Math.max(1, trainingSats.length * HOURS_PER_SAT * INDIVIDUAL_CPH)) * 100)}%`,
                   }}
                 />
               </div>
               <div className="af-prog-label">
-                {fmtCOP(totalUsed)} asignado de {fmtCOP(TOTAL_COST)}
+                {fmtCOP(totalUsed)} asignado{paymentMode === "bronce" ? ` de ${fmtCOP(TOTAL_COST)}` : ""}
               </div>
             </div>
 
@@ -885,13 +945,19 @@ export default function AgilyTeam() {
             <div className="af-card">
               <div className="af-card-title">Resumen financiero</div>
               <div className="af-stat-row">
+                <span className="af-stat-lb">Modo de pago</span>
+                <span className="af-stat-v" style={{ color: paymentMode === "bronce" ? "#734092" : "#1F94CC" }}>
+                  {paymentMode === "bronce" ? "🥉 Paquete Bronce" : "📅 Días individuales"}
+                </span>
+              </div>
+              <div className="af-stat-row">
                 <span className="af-stat-lb">Costo por hora</span>
-                <span className="af-stat-v af-green">{fmtCOP(CPH)}</span>
+                <span className="af-stat-v af-green">{paymentMode === "bronce" ? fmtCOP(CPH) : fmtCOP(INDIVIDUAL_CPH)}</span>
               </div>
               <div className="af-stat-row">
                 <span className="af-stat-lb">Costo por sábado (2h)</span>
                 <span className="af-stat-v af-green">
-                  {fmtCOP(CPH * HOURS_PER_SAT)}
+                  {paymentMode === "bronce" ? fmtCOP(CPH * HOURS_PER_SAT) : fmtCOP(INDIVIDUAL_CPH * HOURS_PER_SAT)}
                 </span>
               </div>
               <div className="af-stat-row">
@@ -1255,6 +1321,16 @@ export default function AgilyTeam() {
         {tab === "extra" && (
           <div>
             <div className="af-stitle">Horas Extra</div>
+            {paymentMode === "individual" && (
+              <div className="af-card">
+                <div className="af-card-title">Modo activo</div>
+                <p className="af-note">
+                  En modo <strong style={{ color: "#1F94CC" }}>Días individuales</strong> no aplica paquete de horas ni turno mensual.
+                  Cada sábado se paga por las horas usadas entre los asistentes.
+                </p>
+              </div>
+            )}
+            {paymentMode !== "individual" && (<>
 
             {/* Stats */}
             <div className="af-card">
@@ -1483,6 +1559,7 @@ export default function AgilyTeam() {
                 )}
               </>
             )}
+          </>)}
           </div>
         )}
 
@@ -1555,7 +1632,7 @@ export default function AgilyTeam() {
                   {fmtCOP(totalUsed)}
                 </span>
               </div>
-              {Math.abs(TOTAL_COST - totalUsed) > 500 && (
+              {paymentMode === "bronce" && Math.abs(TOTAL_COST - totalUsed) > 500 && (
                 <div className="af-alert af-alert-warn">
                   ⚠️ Diferencia de {fmtCOP(Math.abs(TOTAL_COST - totalUsed))} — hay
                   sábados sin asistentes confirmados o horas extra sin asignar.
