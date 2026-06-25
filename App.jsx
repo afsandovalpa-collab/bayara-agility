@@ -23,7 +23,7 @@ const TOTAL_COST = 450000;
 const HOURS_PER_SAT = 2;
 const TOTAL_HOURS = 10;
 const CPH = TOTAL_COST / TOTAL_HOURS;
-const INDIVIDUAL_CPH = 50000; // $50,000/h en modo días individuales
+const INDIVIDUAL_CPH = 55000; // $55,000/h en modo días individuales
 
 const DEMO_MEMBERS = [
   { id: "m1", name: "Andrés" },
