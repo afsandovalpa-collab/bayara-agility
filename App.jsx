@@ -1250,7 +1250,7 @@ export default function AgilyTeam() {
 
                           {/* Fila 2: asistencia */}
                           <div style={{ display: "grid", gridTemplateColumns: cols, borderTop: "1px solid #241848" }}>
-                            <div style={{ ...labelCell, display: "flex", alignItems: "center", color: "#ede0f8", fontSize: 11, fontWeight: 700 }}>
+                            <div style={{ ...labelCell, display: "flex", alignItems: "center", color: "#ede0f8", fontSize: 11, fontWeight: 700, whiteSpace: "normal" }}>
                               {adminMode ? "Asistencia" : "Mis sábados"}
                             </div>
                             {sats.map((s) => {
