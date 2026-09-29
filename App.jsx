@@ -1217,10 +1217,10 @@ export default function AgilyTeam() {
                 <div>
                   {(adminMode ? members : members.filter((m) => m.id === myId)).map((m) => {
                     const canEdit = adminMode || m.id === myId;
-                    const cols = `58px repeat(${sats.length}, minmax(0, 1fr))`;
+                    const cols = `72px repeat(${sats.length}, minmax(0, 1fr))`;
                     const cellBase = { borderLeft: "1px solid #241848", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 0 };
-                    const labelCell = { padding: "0 6px", fontSize: 11, lineHeight: 1.2, color: "#9a7abf", fontWeight: 600 };
-                    const dogBtn = { width: 18, height: 22, borderRadius: 4, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 };
+                    const labelCell = { padding: "0 8px", fontSize: 11, lineHeight: 1.2, color: "#9a7abf", fontWeight: 600, whiteSpace: "nowrap" };
+                    const dogBtn = { width: 15, height: 20, borderRadius: 4, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 };
                     return (
                       <div key={m.id} style={{ marginBottom: 10 }}>
                         {adminMode && (
@@ -1241,7 +1241,7 @@ export default function AgilyTeam() {
                               const monthTxt = d.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
                               return (
                                 <div key={s} style={{ ...cellBase, flexDirection: "column", padding: "6px 0", lineHeight: 1.1, color: isComp ? "#ff6b47" : "#8a6aaa" }}>
-                                  <span style={{ fontSize: 15, fontWeight: 800 }}>{d.getDate()}</span>
+                                  <span style={{ fontSize: 14, fontWeight: 800 }}>{d.getDate()}</span>
                                   <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>{monthTxt}</span>
                                 </div>
                               );
@@ -1250,7 +1250,7 @@ export default function AgilyTeam() {
 
                           {/* Fila 2: asistencia */}
                           <div style={{ display: "grid", gridTemplateColumns: cols, borderTop: "1px solid #241848" }}>
-                            <div style={{ ...labelCell, display: "flex", alignItems: "center", color: "#ede0f8", fontSize: 12, fontWeight: 700 }}>
+                            <div style={{ ...labelCell, display: "flex", alignItems: "center", color: "#ede0f8", fontSize: 11, fontWeight: 700 }}>
                               {adminMode ? "Asistencia" : "Mis sábados"}
                             </div>
                             {sats.map((s) => {
@@ -1261,7 +1261,7 @@ export default function AgilyTeam() {
                                 <div key={s} style={{ ...cellBase, padding: "7px 0" }}>
                                   <button
                                     className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canEdit ? "locked" : ""}`}
-                                    style={{ width: 28, height: 28, borderRadius: 7, fontSize: 14, borderWidth: 2 }}
+                                    style={{ width: 26, height: 26, borderRadius: 7, fontSize: 13, borderWidth: 2 }}
                                     onClick={() => canEdit && !isComp && toggleAttend(m.id, s)}
                                     title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
                                   >
@@ -1274,8 +1274,8 @@ export default function AgilyTeam() {
 
                           {/* Fila 3: número de perros */}
                           <div style={{ display: "grid", gridTemplateColumns: cols, borderTop: "1px solid #241848" }}>
-                            <div style={{ ...labelCell, display: "flex", alignItems: "center", gap: 4 }}>
-                              <span>🐕</span><span>Perros</span>
+                            <div style={{ ...labelCell, display: "flex", alignItems: "center", gap: 5 }}>
+                              <span style={{ fontSize: 12 }}>🐕</span><span>Perros</span>
                             </div>
                             {sats.map((s) => {
                               const isComp = !!compDays[s];
@@ -1287,7 +1287,7 @@ export default function AgilyTeam() {
                                   {!isComp && checked && (
                                     <>
                                       <button style={dogBtn} onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}>−</button>
-                                      <span style={{ width: 12, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
+                                      <span style={{ width: 11, textAlign: "center", fontSize: 12, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
                                       <button style={dogBtn} onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}>+</button>
                                     </>
                                   )}
