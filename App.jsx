@@ -56,6 +56,7 @@ const aColor = (id) => AVATAR_COLORS[id.charCodeAt(id.length - 1) % AVATAR_COLOR
 
 // ── Supabase helpers ─────────────────────────────────────────────
 const MK = (yr, mo) => `ag-${yr}-${mo}`;
+const monthIdx = (k) => { const m = /^ag-(\d{4})-(\d+)$/.exec(k); return m ? Number(m[1]) * 12 + Number(m[2]) : -1; };
 
 async function dbGet(key) {
   const { data } = await sb.from("bayara_store").select("value").eq("key", key).single();
@@ -90,7 +91,7 @@ const BADGE_DEFS = [
 
 function calcBadges(memberId, allHistory, members) {
   const earned = { first_month: 0, ten_sats: 0, turn_done: 0, join_extra: 0, streak_3: 0, fifty_hours: 0 };
-  const monthKeys = Object.keys(allHistory).sort();
+  const monthKeys = Object.keys(allHistory).sort((a, b) => monthIdx(a) - monthIdx(b));
   let totalSats = 0;
   let totalHours = 0;
   let streakCount = 0;
@@ -131,14 +132,14 @@ function calcBadges(memberId, allHistory, members) {
     }
 
     // ⏰ turn_done: this member had the extra turn and there were extra sessions
-    const turnMember = members[extraTurnIdx];
-    if (turnMember?.id === memberId && extraSessions.length > 0) {
+    const monthTurnId = d.turnId ?? members[extraTurnIdx]?.id;
+    if (monthTurnId === memberId && extraSessions.length > 0) {
       earned.turn_done++;
     }
 
     // 🤝 join_extra: joined someone else's extra session
     extraSessions.forEach(sess => {
-      const turnId = members[extraTurnIdx]?.id;
+      const turnId = d.turnId ?? members[extraTurnIdx]?.id;
       if (sess.attendees.includes(memberId) && turnId !== memberId) {
         earned.join_extra++;
       }
@@ -409,6 +410,26 @@ export default function AgilyTeam() {
 
   const mk = MK(yr, mo);
 
+  // ── Orden de rotación de turnos (global) ─────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const val = await dbGet("ag-turnorder");
+        if (val) setTurnOrder(JSON.parse(val));
+      } catch {}
+    })();
+  }, []);
+
+  useRealtimeKey("ag-turnorder", null, (val) => {
+    if (!val) return;
+    try { setTurnOrder(JSON.parse(val)); } catch {}
+  });
+
+  const saveTurnOrder = async (order) => {
+    setTurnOrder(order);
+    try { await dbSet("ag-turnorder", JSON.stringify(order)); } catch {}
+  };
+
   // ── Load history for badges ──────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -489,7 +510,7 @@ export default function AgilyTeam() {
   });
 
   const persist = async (patch = {}) => {
-    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, paymentMode, dogs, ...patch };
+    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, paymentMode, dogs, turnId: turnMember?.id, ...patch };
     setSyncing(true);
     try {
       await dbSet(mk, JSON.stringify(d));
@@ -510,12 +531,12 @@ export default function AgilyTeam() {
       if (!validOrder.length) return members[0];
       const currentMk = MK(yr, mo);
       const sortedKeys = Object.keys(allHistory)
-        .filter(k => /^ag-\d{4}-\d+$/.test(k))
-        .sort();
+        .filter(k => monthIdx(k) >= 0)
+        .sort((a, b) => monthIdx(a) - monthIdx(b));
       let bronceCount = 0;
       let currentMonthCounted = false;
       for (const key of sortedKeys) {
-        if (key > currentMk) break;
+        if (monthIdx(key) > monthIdx(currentMk)) break;
         if (key === currentMk) {
           if (paymentMode === "bronce") bronceCount++;
           currentMonthCounted = true;
@@ -533,6 +554,9 @@ export default function AgilyTeam() {
       return members[0];
     }
   };
+
+  const turnMember = turnOrder.length > 0 ? calcAutoTurn() : (members[extraTurnIdx] ?? members[0]);
+  const isMyTurn = myId === turnMember?.id;
 
   // ── Calculations ──────────────────────────────────────────────
   const trainingSats = sats.filter((s) => !compDays[s]);
@@ -594,8 +618,8 @@ export default function AgilyTeam() {
         ats.forEach((id) => { if (c[id] !== undefined) c[id] += cpp; });
       });
       // Horas del turno (2h fijas) → titular
-      if (turnHours > 0 && members[extraTurnIdx]) {
-        const turnId = members[extraTurnIdx].id;
+      if (turnHours > 0 && turnMember) {
+        const turnId = turnMember.id;
         if (extraSessions.length === 0) {
           if (c[turnId] !== undefined) c[turnId] += turnHours * CPH;
         } else {
@@ -675,7 +699,7 @@ export default function AgilyTeam() {
 
   const addExtraSession = () => {
     if (!nsd || !nsh) return;
-    const turnId = members[extraTurnIdx]?.id;
+    const turnId = turnMember?.id;
     const s = { id: Date.now().toString(), date: nsd, time: nst, hours: nsh, attendees: turnId ? [turnId] : [] };
     const next = [...extraSessions, s];
     setExtraSessions(next);
@@ -787,12 +811,12 @@ export default function AgilyTeam() {
           `${compDays[s] ? "🏆" : "✅"} ${shortDate(s)}: ${
             compDays[s]
               ? "Competencia (no entrena)"
-              : `${getAttendees(s).length} personas`
+              : `${getAttendeeIds(s).length} personas`
           }`
       ),
       ``,
       paymentMode === "bronce" && extraHours > 0
-        ? `*⏰ Horas extra (${extraHours}h):*\nTurno de: ${members[extraTurnIdx]?.name ?? "-"} (+${fmtCOP(extraHours * CPH)} incluido en su cobro)`
+        ? `*⏰ Horas extra (${extraHours}h):*\nTurno de: ${turnMember?.name ?? "-"} (+${fmtCOP(extraHours * CPH)} incluido en su cobro)`
         : null,
       paymentMode === "bronce" && extraSessions.length > 0
         ? `\n*Sesiones extra registradas:*\n` +
@@ -824,9 +848,6 @@ export default function AgilyTeam() {
   const nextMonth = () => {
     if (mo === 11) { setYr(yr + 1); setMo(0); } else setMo(mo + 1);
   };
-
-  const turnMember = turnOrder.length > 0 ? calcAutoTurn() : (members[extraTurnIdx] ?? members[0]);
-  const isMyTurn = myId === turnMember?.id;
 
   if (!loaded)
     return (
@@ -1192,83 +1213,68 @@ export default function AgilyTeam() {
                   </div>
                 )}
 
-                {/* Grid table */}
-                <div style={{ overflowX: "auto" }}>
-                  {/* Member rows */}
+                {/* Grid: cada sábado es una columna → fecha, chulo, nº de perros */}
+                <div>
                   {(adminMode ? members : members.filter((m) => m.id === myId)).map((m) => {
-                    const hasAnyAttendance = sats.some(s => !compDays[s] && !!attend[`${m.id}-${s}`]);
-                    const colTemplate = `90px repeat(${sats.length}, 1fr)`;
+                    const canEdit = adminMode || m.id === myId;
                     return (
-                      <div key={m.id} style={{ background: "#131020", borderRadius: 12, padding: "12px", marginBottom: 8, border: "1px solid #1e1438" }}>
-                        {/* Member label */}
-                        {adminMode && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <div key={m.id} style={{ background: "#131020", borderRadius: 12, padding: "12px 10px", marginBottom: 8, border: "1px solid #1e1438" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                          {adminMode && (
                             <div className="af-av" style={{ background: aColor(m.id), width: 26, height: 26, fontSize: 10 }}>
                               {initials(m.name)}
                             </div>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: "#ede0f8" }}>{m.name.split(" ")[0]}</span>
-                          </div>
-                        )}
-
-                        {/* Date headers row */}
-                        <div style={{ display: "grid", gridTemplateColumns: colTemplate, gap: 4, marginBottom: 6 }}>
-                          <div />
-                          {sats.map((s) => (
-                            <div key={s} style={{ textAlign: "center", fontSize: 10, fontWeight: 700, lineHeight: 1.2,
-                              color: compDays[s] ? "#ff6b47" : "#8a6aaa" }}>
-                              {shortDate(s).replace(" de ", "\n").split("\n").map((p, i) => <div key={i}>{p}</div>)}
-                            </div>
-                          ))}
+                          )}
+                          <span style={{ fontSize: 14, fontWeight: 700, color: "#ede0f8" }}>
+                            {adminMode ? m.name.split(" ")[0] : "Mis sábados"}
+                          </span>
                         </div>
 
-                        {/* Attendance row */}
-                        <div style={{ display: "grid", gridTemplateColumns: colTemplate, gap: 4, alignItems: "center", marginBottom: 2 }}>
-                          <div style={{ fontSize: 11, color: "#6a4a8a" }}>Asistencia</div>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${sats.length}, minmax(0, 1fr))`, gap: 4 }}>
                           {sats.map((s) => {
                             const isComp = !!compDays[s];
                             const checked = !!attend[`${m.id}-${s}`];
                             const xfer = transfers.find((t) => t.from === m.id && t.sat === s);
-                            const canToggle = adminMode || m.id === myId;
+                            const eid = getEffective(m.id, s);
+                            const dogCount = dogs[`${eid}-${s}`] ?? 1;
+                            const d = new Date(s + "T12:00:00");
+                            const dayNum = d.getDate();
+                            const monthTxt = d.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
+                            const dogBtn = { width: 20, height: 24, borderRadius: 5, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 };
                             return (
-                              <div key={s} style={{ display: "flex", justifyContent: "center" }}>
+                              <div key={s} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                                {/* 1. Fecha */}
+                                <div style={{ textAlign: "center", lineHeight: 1.1, color: isComp ? "#ff6b47" : "#8a6aaa" }}>
+                                  <div style={{ fontSize: 17, fontWeight: 800 }}>{dayNum}</div>
+                                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{monthTxt}</div>
+                                </div>
+
+                                {/* 2. Chulo */}
                                 <button
-                                  className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canToggle ? "locked" : ""}`}
-                                  onClick={() => canToggle && !isComp && toggleAttend(m.id, s)}
+                                  className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canEdit ? "locked" : ""}`}
+                                  onClick={() => canEdit && !isComp && toggleAttend(m.id, s)}
                                   title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
-                                  style={{ width: 34, height: 34, flexShrink: 0 }}
                                 >
                                   {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
                                 </button>
+
+                                {/* 3. − N + (solo si confirmó) */}
+                                <div style={{ height: 24, display: "flex", alignItems: "center", justifyContent: "center", gap: 1 }}>
+                                  {!isComp && checked && (
+                                    <>
+                                      <button style={dogBtn} onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}>−</button>
+                                      <span style={{ width: 14, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
+                                      <button style={dogBtn} onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}>+</button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             );
                           })}
                         </div>
-
-                        {/* Dog count row */}
-                        {hasAnyAttendance && (
-                          <div style={{ display: "grid", gridTemplateColumns: colTemplate, gap: 4, alignItems: "center", marginTop: 8 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: "#6a4a8a" }}>
-                              <span>🐕</span><span>Perros</span>
-                            </div>
-                            {sats.map((s) => {
-                              const isComp = !!compDays[s];
-                              const checked = !!attend[`${m.id}-${s}`];
-                              const eid = getEffective(m.id, s);
-                              const dogCount = dogs[`${eid}-${s}`] ?? 1;
-                              const canEdit = adminMode || m.id === myId;
-                              if (isComp || !checked) return <div key={s} style={{ height: 28 }} />;
-                              return (
-                                <div key={s} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
-                                  <button onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}
-                                    style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>−</button>
-                                  <span style={{ width: 16, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
-                                  <button onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}
-                                    style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>+</button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
+                        <div style={{ marginTop: 10, fontSize: 11, color: "#6a4a8a", textAlign: "center" }}>
+                          ✓ asistencia · − 1 + número de perros
+                        </div>
                       </div>
                     );
                   })}
