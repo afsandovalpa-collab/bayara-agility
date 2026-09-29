@@ -504,29 +504,34 @@ export default function AgilyTeam() {
 
   // ── Auto turn calculation ─────────────────────────────────────
   const calcAutoTurn = () => {
-    if (!turnOrder.length) return members[extraTurnIdx] ?? members[0];
-    const currentMk = MK(yr, mo);
-    const sortedKeys = Object.keys(allHistory)
-      .filter(k => /^ag-\d{4}-\d+$/.test(k))
-      .sort();
-    let bronceCount = 0;
-    let currentMonthCounted = false;
-    for (const key of sortedKeys) {
-      if (key > currentMk) break;
-      if (key === currentMk) {
-        if (paymentMode === "bronce") bronceCount++;
-        currentMonthCounted = true;
-      } else {
-        const d = allHistory[key];
-        const mode = d?.paymentMode ?? "bronce";
-        if (mode === "bronce") bronceCount++;
+    try {
+      if (!turnOrder.length) return members[extraTurnIdx] ?? members[0];
+      const validOrder = turnOrder.filter(id => members.find(m => m.id === id));
+      if (!validOrder.length) return members[0];
+      const currentMk = MK(yr, mo);
+      const sortedKeys = Object.keys(allHistory)
+        .filter(k => /^ag-\d{4}-\d+$/.test(k))
+        .sort();
+      let bronceCount = 0;
+      let currentMonthCounted = false;
+      for (const key of sortedKeys) {
+        if (key > currentMk) break;
+        if (key === currentMk) {
+          if (paymentMode === "bronce") bronceCount++;
+          currentMonthCounted = true;
+        } else {
+          const d = allHistory[key];
+          const mode = d?.paymentMode ?? "bronce";
+          if (mode === "bronce") bronceCount++;
+        }
       }
+      if (!currentMonthCounted && paymentMode === "bronce") bronceCount++;
+      if (bronceCount === 0) bronceCount = 1;
+      const idx = (bronceCount - 1) % validOrder.length;
+      return members.find(m => m.id === validOrder[idx]) ?? members[0];
+    } catch {
+      return members[0];
     }
-    if (!currentMonthCounted && paymentMode === "bronce") bronceCount++;
-    if (bronceCount === 0) bronceCount = 1;
-    const idx = (bronceCount - 1) % turnOrder.length;
-    const turnId = turnOrder[idx];
-    return members.find(m => m.id === turnId) ?? members[0];
   };
 
   // ── Calculations ──────────────────────────────────────────────
@@ -1198,84 +1203,102 @@ export default function AgilyTeam() {
                   ))}
                 </div>
 
-                {/* Rows */}
-                {(adminMode
-                  ? members
-                  : members.filter((m) => m.id === myId)
-                ).map((m) => (
-                  <div key={m.id} className="af-mrow">
-                    {adminMode && (
-                      <>
-                        <div
-                          className="af-av"
-                          style={{
-                            background: aColor(m.id),
-                            width: 32,
-                            height: 32,
-                            fontSize: 12,
-                          }}
-                        >
-                          {initials(m.name)}
-                        </div>
-                        <div className="af-mname">{m.name.split(" ")[0]}</div>
-                      </>
-                    )}
-                    {!adminMode && (
-                      <div className="af-mname" style={{ fontSize: 13 }}>
-                        Mis sábados
+                {/* Grid table */}
+                <div style={{ overflowX: "auto" }}>
+                  {/* Column headers */}
+                  <div style={{ display: "grid", gridTemplateColumns: `120px repeat(${sats.length}, 1fr)`, gap: 6, marginBottom: 6, minWidth: 320 }}>
+                    <div />
+                    {sats.map((s) => (
+                      <div key={s} style={{ textAlign: "center", fontSize: 11, fontWeight: 700,
+                        color: compDays[s] ? "#ff6b47" : "#8a6aaa", lineHeight: 1.3 }}>
+                        {shortDate(s).split(" ").map((p, i) => <div key={i}>{p}</div>)}
                       </div>
-                    )}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      {sats.map((s) => {
-                        const isComp = !!compDays[s];
-                        const checked = !!attend[`${m.id}-${s}`];
-                        const xfer = transfers.find((t) => t.from === m.id && t.sat === s);
-                        const canToggle = adminMode || m.id === myId;
-                        const eid = getEffective(m.id, s);
-                        const dogCount = dogs[`${eid}-${s}`] ?? 1;
-                        return (
-                          <div key={s} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <button
-                              className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canToggle ? "locked" : ""}`}
-                              onClick={() => canToggle && !isComp && toggleAttend(m.id, s)}
-                              title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
-                            >
-                              {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
-                            </button>
-                            {checked && !isComp && (adminMode || m.id === myId) && (
-                              <div className="af-dog-toggle">
-                                <button className={`af-dog-btn ${dogCount === 1 ? "active" : ""}`}
-                                  onClick={() => setDogCount(eid, s, 1)}>🐕</button>
-                                <button className={`af-dog-btn ${dogCount === 2 ? "active" : ""}`}
-                                  onClick={() => setDogCount(eid, s, 2)}>🐕🐕</button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    ))}
                   </div>
-                ))}
+
+                  {/* Member rows */}
+                  {(adminMode ? members : members.filter((m) => m.id === myId)).map((m) => {
+                    const hasAnyAttendance = sats.some(s => !compDays[s] && !!attend[`${m.id}-${s}`]);
+                    return (
+                      <div key={m.id} style={{ background: "#131020", borderRadius: 12, padding: "10px 12px", marginBottom: 8, border: "1px solid #1e1438" }}>
+                        {/* Member label */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                          {adminMode && (
+                            <div className="af-av" style={{ background: aColor(m.id), width: 26, height: 26, fontSize: 10 }}>
+                              {initials(m.name)}
+                            </div>
+                          )}
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "#ede0f8" }}>
+                            {adminMode ? m.name.split(" ")[0] : "Mis sábados"}
+                          </span>
+                        </div>
+
+                        {/* Attendance row */}
+                        <div style={{ display: "grid", gridTemplateColumns: `120px repeat(${sats.length}, 1fr)`, gap: 6, alignItems: "center", minWidth: 320 }}>
+                          <div style={{ fontSize: 11, color: "#6a4a8a" }}>Asistencia</div>
+                          {sats.map((s) => {
+                            const isComp = !!compDays[s];
+                            const checked = !!attend[`${m.id}-${s}`];
+                            const xfer = transfers.find((t) => t.from === m.id && t.sat === s);
+                            const canToggle = adminMode || m.id === myId;
+                            return (
+                              <div key={s} style={{ display: "flex", justifyContent: "center" }}>
+                                <button
+                                  className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canToggle ? "locked" : ""}`}
+                                  onClick={() => canToggle && !isComp && toggleAttend(m.id, s)}
+                                  title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
+                                >
+                                  {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Dog count row — only when at least one saturday confirmed */}
+                        {hasAnyAttendance && (
+                          <div style={{ display: "grid", gridTemplateColumns: `120px repeat(${sats.length}, 1fr)`, gap: 6, alignItems: "center", marginTop: 8, minWidth: 320 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6a4a8a" }}>
+                              <span>🐕</span> Nº perros
+                            </div>
+                            {sats.map((s) => {
+                              const isComp = !!compDays[s];
+                              const checked = !!attend[`${m.id}-${s}`];
+                              const eid = getEffective(m.id, s);
+                              const dogCount = dogs[`${eid}-${s}`] ?? 1;
+                              const canEdit = adminMode || m.id === myId;
+                              if (isComp || !checked) return <div key={s} />;
+                              return (
+                                <div key={s} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
+                                  <button
+                                    onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}
+                                    style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>
+                                    −
+                                  </button>
+                                  <span style={{ width: 20, textAlign: "center", fontSize: 14, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
+                                  <button
+                                    onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}
+                                    style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>
+                                    +
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
 
                 {/* Legend */}
                 <div className="af-legend">
                   <div className="af-legend-item">
-                    <div
-                      style={{
-                        width: 16,
-                        height: 16,
-                        background: "#b0ef28",
-                        borderRadius: 4,
-                      }}
-                    />
+                    <div style={{ width: 16, height: 16, background: "#1F94CC", borderRadius: 4 }} />
                     Confirmado
                   </div>
-                  <div className="af-legend-item">
-                    <span>↪</span> Cedido
-                  </div>
-                  <div className="af-legend-item">
-                    <span>🏆</span> Competencia
-                  </div>
+                  <div className="af-legend-item"><span>↪</span> Cedido</div>
+                  <div className="af-legend-item"><span>🏆</span> Competencia</div>
                 </div>
               </div>
             )}
