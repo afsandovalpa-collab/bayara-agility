@@ -368,9 +368,9 @@ const STYLES = `
 // ── Main Component ────────────────────────────────────────────────
 export default function AgilyTeam() {
   const now = new Date();
-  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const [yr, setYr] = useState(nextMonth.getFullYear());
-  const [mo, setMo] = useState(nextMonth.getMonth());
+  const defaultMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const [yr, setYr] = useState(defaultMonth.getFullYear());
+  const [mo, setMo] = useState(defaultMonth.getMonth());
 
   // Core data
   const [members, setMembers] = useState(DEMO_MEMBERS);
