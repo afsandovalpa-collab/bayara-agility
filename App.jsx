@@ -1213,67 +1213,88 @@ export default function AgilyTeam() {
                   </div>
                 )}
 
-                {/* Grid: cada sábado es una columna → fecha, chulo, nº de perros */}
+                {/* Tabla: etiquetas a la izquierda, una columna por sábado */}
                 <div>
                   {(adminMode ? members : members.filter((m) => m.id === myId)).map((m) => {
                     const canEdit = adminMode || m.id === myId;
+                    const cols = `58px repeat(${sats.length}, minmax(0, 1fr))`;
+                    const cellBase = { borderLeft: "1px solid #241848", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 0 };
+                    const labelCell = { padding: "0 6px", fontSize: 11, lineHeight: 1.2, color: "#9a7abf", fontWeight: 600 };
+                    const dogBtn = { width: 18, height: 22, borderRadius: 4, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 };
                     return (
-                      <div key={m.id} style={{ background: "#131020", borderRadius: 12, padding: "12px 10px", marginBottom: 8, border: "1px solid #1e1438" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                          {adminMode && (
-                            <div className="af-av" style={{ background: aColor(m.id), width: 26, height: 26, fontSize: 10 }}>
+                      <div key={m.id} style={{ marginBottom: 10 }}>
+                        {adminMode && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <div className="af-av" style={{ background: aColor(m.id), width: 24, height: 24, fontSize: 10 }}>
                               {initials(m.name)}
                             </div>
-                          )}
-                          <span style={{ fontSize: 14, fontWeight: 700, color: "#ede0f8" }}>
-                            {adminMode ? m.name.split(" ")[0] : "Mis sábados"}
-                          </span>
-                        </div>
-
-                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${sats.length}, minmax(0, 1fr))`, gap: 4 }}>
-                          {sats.map((s) => {
-                            const isComp = !!compDays[s];
-                            const checked = !!attend[`${m.id}-${s}`];
-                            const xfer = transfers.find((t) => t.from === m.id && t.sat === s);
-                            const eid = getEffective(m.id, s);
-                            const dogCount = dogs[`${eid}-${s}`] ?? 1;
-                            const d = new Date(s + "T12:00:00");
-                            const dayNum = d.getDate();
-                            const monthTxt = d.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
-                            const dogBtn = { width: 20, height: 24, borderRadius: 5, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 };
-                            return (
-                              <div key={s} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                                {/* 1. Fecha */}
-                                <div style={{ textAlign: "center", lineHeight: 1.1, color: isComp ? "#ff6b47" : "#8a6aaa" }}>
-                                  <div style={{ fontSize: 17, fontWeight: 800 }}>{dayNum}</div>
-                                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{monthTxt}</div>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{m.name.split(" ")[0]}</span>
+                          </div>
+                        )}
+                        <div style={{ background: "#131020", border: "1px solid #241848", borderRadius: 12, overflow: "hidden" }}>
+                          {/* Fila 1: fechas */}
+                          <div style={{ display: "grid", gridTemplateColumns: cols }}>
+                            <div />
+                            {sats.map((s) => {
+                              const isComp = !!compDays[s];
+                              const d = new Date(s + "T12:00:00");
+                              const monthTxt = d.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
+                              return (
+                                <div key={s} style={{ ...cellBase, flexDirection: "column", padding: "6px 0", lineHeight: 1.1, color: isComp ? "#ff6b47" : "#8a6aaa" }}>
+                                  <span style={{ fontSize: 15, fontWeight: 800 }}>{d.getDate()}</span>
+                                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>{monthTxt}</span>
                                 </div>
+                              );
+                            })}
+                          </div>
 
-                                {/* 2. Chulo */}
-                                <button
-                                  className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canEdit ? "locked" : ""}`}
-                                  onClick={() => canEdit && !isComp && toggleAttend(m.id, s)}
-                                  title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
-                                >
-                                  {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
-                                </button>
+                          {/* Fila 2: asistencia */}
+                          <div style={{ display: "grid", gridTemplateColumns: cols, borderTop: "1px solid #241848" }}>
+                            <div style={{ ...labelCell, display: "flex", alignItems: "center", color: "#ede0f8", fontSize: 12, fontWeight: 700 }}>
+                              {adminMode ? "Asistencia" : "Mis sábados"}
+                            </div>
+                            {sats.map((s) => {
+                              const isComp = !!compDays[s];
+                              const checked = !!attend[`${m.id}-${s}`];
+                              const xfer = transfers.find((t) => t.from === m.id && t.sat === s);
+                              return (
+                                <div key={s} style={{ ...cellBase, padding: "7px 0" }}>
+                                  <button
+                                    className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canEdit ? "locked" : ""}`}
+                                    style={{ width: 28, height: 28, borderRadius: 7, fontSize: 14, borderWidth: 2 }}
+                                    onClick={() => canEdit && !isComp && toggleAttend(m.id, s)}
+                                    title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
+                                  >
+                                    {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
 
-                                {/* 3. − N + (solo si confirmó) */}
-                                <div style={{ height: 24, display: "flex", alignItems: "center", justifyContent: "center", gap: 1 }}>
+                          {/* Fila 3: número de perros */}
+                          <div style={{ display: "grid", gridTemplateColumns: cols, borderTop: "1px solid #241848" }}>
+                            <div style={{ ...labelCell, display: "flex", alignItems: "center", gap: 4 }}>
+                              <span>🐕</span><span>Perros</span>
+                            </div>
+                            {sats.map((s) => {
+                              const isComp = !!compDays[s];
+                              const checked = !!attend[`${m.id}-${s}`];
+                              const eid = getEffective(m.id, s);
+                              const dogCount = dogs[`${eid}-${s}`] ?? 1;
+                              return (
+                                <div key={s} style={{ ...cellBase, padding: "7px 0", gap: 0, minHeight: 36 }}>
                                   {!isComp && checked && (
                                     <>
                                       <button style={dogBtn} onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}>−</button>
-                                      <span style={{ width: 14, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
+                                      <span style={{ width: 12, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
                                       <button style={dogBtn} onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}>+</button>
                                     </>
                                   )}
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{ marginTop: 10, fontSize: 11, color: "#6a4a8a", textAlign: "center" }}>
-                          ✓ asistencia · − 1 + número de perros
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
                     );
