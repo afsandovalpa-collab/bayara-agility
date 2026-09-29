@@ -1192,49 +1192,37 @@ export default function AgilyTeam() {
                   </div>
                 )}
 
-                {/* Saturday dates legend */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 4px", marginBottom: 10 }}>
-                  {sats.map((s, i) => (
-                    <div key={s} style={{ fontSize: 11, color: compDays[s] ? "#ff6b47" : "#6a9a6e",
-                      background: "#131020", border: `1px solid ${compDays[s] ? "#ff6b4730" : "#241848"}`,
-                      borderRadius: 6, padding: "2px 8px", fontWeight: 700 }}>
-                      {i+1}. {shortDate(s)}
-                    </div>
-                  ))}
-                </div>
-
                 {/* Grid table */}
                 <div style={{ overflowX: "auto" }}>
-                  {/* Column headers */}
-                  <div style={{ display: "grid", gridTemplateColumns: `120px repeat(${sats.length}, 1fr)`, gap: 6, marginBottom: 6, minWidth: 320 }}>
-                    <div />
-                    {sats.map((s) => (
-                      <div key={s} style={{ textAlign: "center", fontSize: 11, fontWeight: 700,
-                        color: compDays[s] ? "#ff6b47" : "#8a6aaa", lineHeight: 1.3 }}>
-                        {shortDate(s).split(" ").map((p, i) => <div key={i}>{p}</div>)}
-                      </div>
-                    ))}
-                  </div>
-
                   {/* Member rows */}
                   {(adminMode ? members : members.filter((m) => m.id === myId)).map((m) => {
                     const hasAnyAttendance = sats.some(s => !compDays[s] && !!attend[`${m.id}-${s}`]);
+                    const colTemplate = `90px repeat(${sats.length}, 1fr)`;
                     return (
-                      <div key={m.id} style={{ background: "#131020", borderRadius: 12, padding: "10px 12px", marginBottom: 8, border: "1px solid #1e1438" }}>
+                      <div key={m.id} style={{ background: "#131020", borderRadius: 12, padding: "12px", marginBottom: 8, border: "1px solid #1e1438" }}>
                         {/* Member label */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                          {adminMode && (
+                        {adminMode && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                             <div className="af-av" style={{ background: aColor(m.id), width: 26, height: 26, fontSize: 10 }}>
                               {initials(m.name)}
                             </div>
-                          )}
-                          <span style={{ fontSize: 13, fontWeight: 600, color: "#ede0f8" }}>
-                            {adminMode ? m.name.split(" ")[0] : "Mis sábados"}
-                          </span>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: "#ede0f8" }}>{m.name.split(" ")[0]}</span>
+                          </div>
+                        )}
+
+                        {/* Date headers row */}
+                        <div style={{ display: "grid", gridTemplateColumns: colTemplate, gap: 4, marginBottom: 6 }}>
+                          <div />
+                          {sats.map((s) => (
+                            <div key={s} style={{ textAlign: "center", fontSize: 10, fontWeight: 700, lineHeight: 1.2,
+                              color: compDays[s] ? "#ff6b47" : "#8a6aaa" }}>
+                              {shortDate(s).replace(" de ", "\n").split("\n").map((p, i) => <div key={i}>{p}</div>)}
+                            </div>
+                          ))}
                         </div>
 
                         {/* Attendance row */}
-                        <div style={{ display: "grid", gridTemplateColumns: `120px repeat(${sats.length}, 1fr)`, gap: 6, alignItems: "center", minWidth: 320 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: colTemplate, gap: 4, alignItems: "center", marginBottom: 2 }}>
                           <div style={{ fontSize: 11, color: "#6a4a8a" }}>Asistencia</div>
                           {sats.map((s) => {
                             const isComp = !!compDays[s];
@@ -1247,6 +1235,7 @@ export default function AgilyTeam() {
                                   className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canToggle ? "locked" : ""}`}
                                   onClick={() => canToggle && !isComp && toggleAttend(m.id, s)}
                                   title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
+                                  style={{ width: 34, height: 34, flexShrink: 0 }}
                                 >
                                   {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
                                 </button>
@@ -1255,11 +1244,11 @@ export default function AgilyTeam() {
                           })}
                         </div>
 
-                        {/* Dog count row — only when at least one saturday confirmed */}
+                        {/* Dog count row */}
                         {hasAnyAttendance && (
-                          <div style={{ display: "grid", gridTemplateColumns: `120px repeat(${sats.length}, 1fr)`, gap: 6, alignItems: "center", marginTop: 8, minWidth: 320 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6a4a8a" }}>
-                              <span>🐕</span> Nº perros
+                          <div style={{ display: "grid", gridTemplateColumns: colTemplate, gap: 4, alignItems: "center", marginTop: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: "#6a4a8a" }}>
+                              <span>🐕</span><span>Perros</span>
                             </div>
                             {sats.map((s) => {
                               const isComp = !!compDays[s];
@@ -1267,20 +1256,14 @@ export default function AgilyTeam() {
                               const eid = getEffective(m.id, s);
                               const dogCount = dogs[`${eid}-${s}`] ?? 1;
                               const canEdit = adminMode || m.id === myId;
-                              if (isComp || !checked) return <div key={s} />;
+                              if (isComp || !checked) return <div key={s} style={{ height: 28 }} />;
                               return (
                                 <div key={s} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
-                                  <button
-                                    onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}
-                                    style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>
-                                    −
-                                  </button>
-                                  <span style={{ width: 20, textAlign: "center", fontSize: 14, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
-                                  <button
-                                    onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}
-                                    style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>
-                                    +
-                                  </button>
+                                  <button onClick={() => canEdit && dogCount > 1 && setDogCount(eid, s, dogCount - 1)}
+                                    style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>−</button>
+                                  <span style={{ width: 16, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ede0f8" }}>{dogCount}</span>
+                                  <button onClick={() => canEdit && dogCount < 2 && setDogCount(eid, s, dogCount + 1)}
+                                    style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #2e1e50", background: "#1a1030", color: "#9a7abf", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>+</button>
                                 </div>
                               );
                             })}
