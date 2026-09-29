@@ -342,6 +342,15 @@ const STYLES = `
   .af-rank-pos.bronze { color:#CD7F32; }
   .af-rank-total { margin-left:auto; font-family:'Bebas Neue',sans-serif; font-size:20px; color:#1F94CC; }
 
+  /* ── Turn order ── */
+  .af-turn-order-row { display:flex; align-items:center; gap:8px; padding:8px 10px; background:#131020; border-radius:10px; margin-bottom:6px; border:1px solid #1e1438; }
+  .af-turn-order-num { font-family:'Bebas Neue',sans-serif; font-size:18px; color:#734092; width:20px; text-align:center; flex-shrink:0; }
+  .af-turn-order-btns { display:flex; flex-direction:column; gap:2px; margin-left:auto; }
+  .af-turn-order-btn { background:#1a1030; border:1px solid #2e1e50; color:#9a7abf; width:24px; height:20px; border-radius:4px; cursor:pointer; font-size:11px; display:flex; align-items:center; justify-content:center; }
+  .af-dog-toggle { display:flex; gap:4px; margin-left:4px; }
+  .af-dog-btn { background:#131020; border:1px solid #241848; border-radius:6px; padding:2px 6px; font-size:11px; cursor:pointer; color:#9a7abf; transition:all 0.15s; white-space:nowrap; }
+  .af-dog-btn.active { background:#73409225; border-color:#734092; color:#ede0f8; }
+
   /* ── Mode selector ── */
   .af-mode-row { display:flex; gap:8px; margin-bottom:14px; }
   .af-mode-btn { flex:1; padding:10px 12px; border-radius:12px; border:2px solid #2e1e50; background:#131020; color:#9a7abf; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:700; cursor:pointer; transition:all 0.2s; text-align:center; }
@@ -383,6 +392,8 @@ export default function AgilyTeam() {
   const [newName, setNewName] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [allHistory, setAllHistory] = useState({}); // { "yr-mo": monthData }
+  const [turnOrder, setTurnOrder] = useState([]); // ordered member IDs for auto-rotation
+  const [dogs, setDogs] = useState({}); // { "memberId-satDate": 2 }
   const [paymentMode, setPaymentMode] = useState("bronce"); // "bronce" | "individual"
 
   // Transfer form
@@ -436,6 +447,7 @@ export default function AgilyTeam() {
           setExtraSessions(d.extraSessions ?? []);
           setFreeSessions(d.freeSessions ?? []);
           setPaymentMode(d.paymentMode ?? "bronce");
+          setDogs(d.dogs ?? {});
         } else {
           setSats(getSats(yr, mo));
           setCompDays({});
@@ -445,6 +457,7 @@ export default function AgilyTeam() {
           setFreeSessions([]);
           setExtraTurnIdx(0);
           setPaymentMode("bronce");
+          setDogs({});
         }
       } catch {
         setSats(getSats(yr, mo));
@@ -466,6 +479,7 @@ export default function AgilyTeam() {
       setExtraSessions(d.extraSessions ?? []);
       setFreeSessions(d.freeSessions ?? []);
       setPaymentMode(d.paymentMode ?? "bronce");
+      setDogs(d.dogs ?? {});
     } catch {}
   });
 
@@ -475,7 +489,7 @@ export default function AgilyTeam() {
   });
 
   const persist = async (patch = {}) => {
-    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, paymentMode, ...patch };
+    const d = { sats, compDays, attend, transfers, extraTurnIdx, extraSessions, freeSessions, paymentMode, dogs, ...patch };
     setSyncing(true);
     try {
       await dbSet(mk, JSON.stringify(d));
@@ -486,6 +500,33 @@ export default function AgilyTeam() {
 
   const pm = async (m) => {
     try { await dbSet("ag-members", JSON.stringify(m)); } catch {}
+  };
+
+  // ── Auto turn calculation ─────────────────────────────────────
+  const calcAutoTurn = () => {
+    if (!turnOrder.length) return members[extraTurnIdx] ?? members[0];
+    const currentMk = MK(yr, mo);
+    const sortedKeys = Object.keys(allHistory)
+      .filter(k => /^ag-\d{4}-\d+$/.test(k))
+      .sort();
+    let bronceCount = 0;
+    let currentMonthCounted = false;
+    for (const key of sortedKeys) {
+      if (key > currentMk) break;
+      if (key === currentMk) {
+        if (paymentMode === "bronce") bronceCount++;
+        currentMonthCounted = true;
+      } else {
+        const d = allHistory[key];
+        const mode = d?.paymentMode ?? "bronce";
+        if (mode === "bronce") bronceCount++;
+      }
+    }
+    if (!currentMonthCounted && paymentMode === "bronce") bronceCount++;
+    if (bronceCount === 0) bronceCount = 1;
+    const idx = (bronceCount - 1) % turnOrder.length;
+    const turnId = turnOrder[idx];
+    return members.find(m => m.id === turnId) ?? members[0];
   };
 
   // ── Calculations ──────────────────────────────────────────────
@@ -505,12 +546,26 @@ export default function AgilyTeam() {
     return t ? t.to : mid;
   };
 
-  const getAttendees = (sat) => {
+  const getAttendeeIds = (sat) => {
+    // Unique IDs for display purposes
     const ids = new Set();
     members.forEach((m) => {
       if (attend[`${m.id}-${sat}`]) ids.add(getEffective(m.id, sat));
     });
     return [...ids];
+  };
+
+  const getAttendees = (sat) => {
+    // Weighted by dog count for cost calculation
+    const weighted = [];
+    members.forEach((m) => {
+      if (attend[`${m.id}-${sat}`]) {
+        const eid = getEffective(m.id, sat);
+        const dogCount = dogs[`${eid}-${sat}`] ?? 1;
+        for (let i = 0; i < dogCount; i++) weighted.push(eid);
+      }
+    });
+    return weighted;
   };
 
   const calcCosts = () => {
@@ -621,6 +676,13 @@ export default function AgilyTeam() {
     setExtraSessions(next);
     persist({ extraSessions: next });
     setNsd(""); setNst(""); setNsh(1); setNsa([]);
+  };
+
+  const setDogCount = (memberId, sat, count) => {
+    const key = `${memberId}-${sat}`;
+    const next = { ...dogs, [key]: count };
+    setDogs(next);
+    persist({ dogs: next });
   };
 
   const startEditing = (s) => {
@@ -758,7 +820,7 @@ export default function AgilyTeam() {
     if (mo === 11) { setYr(yr + 1); setMo(0); } else setMo(mo + 1);
   };
 
-  const turnMember = members[extraTurnIdx] ?? members[0];
+  const turnMember = turnOrder.length > 0 ? calcAutoTurn() : (members[extraTurnIdx] ?? members[0]);
   const isMyTurn = myId === turnMember?.id;
 
   if (!loaded)
@@ -899,7 +961,7 @@ export default function AgilyTeam() {
               <div className="af-card-title">Sábados del mes</div>
               {sats.map((s) => {
                 const isComp = !!compDays[s];
-                const ats = getAttendees(s);
+                const ats = getAttendeeIds(s);
                 return (
                   <div key={s} style={{ marginBottom: 10 }}>
                     <div className={`af-sat ${isComp ? "cp" : "tr"}`} style={{ marginBottom: ats.length > 0 ? 6 : 0 }}>
@@ -922,16 +984,20 @@ export default function AgilyTeam() {
                     </div>
                     {!isComp && ats.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 5, paddingLeft: 8 }}>
-                        {ats.map((id) => (
-                          <div key={id} style={{ display: "flex", alignItems: "center", gap: 4,
-                            background: "#1a1030", border: "1px solid #241848",
-                            borderRadius: 20, padding: "3px 10px 3px 6px" }}>
-                            <div className="af-av" style={{ background: aColor(id), width: 20, height: 20, fontSize: 9 }}>
-                              {initials(mn(id))}
+                        {ats.map((id) => {
+                          const dc = dogs[`${id}-${s}`] ?? 1;
+                          return (
+                            <div key={id} style={{ display: "flex", alignItems: "center", gap: 4,
+                              background: "#1a1030", border: "1px solid #241848",
+                              borderRadius: 20, padding: "3px 10px 3px 6px" }}>
+                              <div className="af-av" style={{ background: aColor(id), width: 20, height: 20, fontSize: 9 }}>
+                                {initials(mn(id))}
+                              </div>
+                              <span style={{ fontSize: 12, color: "#ede0f8" }}>{firstName(id)}</span>
+                              {dc === 2 && <span style={{ fontSize: 11 }}>🐕🐕</span>}
                             </div>
-                            <span style={{ fontSize: 12, color: "#ede0f8" }}>{firstName(id)}</span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                     {!isComp && ats.length === 0 && (
@@ -946,6 +1012,62 @@ export default function AgilyTeam() {
                 </div>
               )}
             </div>
+
+            {/* Turn order admin UI */}
+            {adminMode && paymentMode === "bronce" && (
+              <div className="af-card">
+                <div className="af-card-title">Orden de rotación — horas extra</div>
+                {turnOrder.length === 0 ? (
+                  <div>
+                    <p className="af-note af-mb12">Define el orden de rotación. El sistema asignará automáticamente las horas extra cada mes de Paquete Bronce.</p>
+                    <button className="af-btn af-btn-p" onClick={() => saveTurnOrder(members.map(m => m.id))}>
+                      📋 Generar orden inicial
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    {turnOrder.map((id, idx) => {
+                      const m = members.find(x => x.id === id);
+                      if (!m) return null;
+                      const isCurrent = turnMember?.id === id;
+                      return (
+                        <div key={id} className="af-turn-order-row"
+                          style={isCurrent ? { borderColor: "#1F94CC", background: "#0e1e30" } : {}}>
+                          <div className="af-turn-order-num">{idx + 1}</div>
+                          <div className="af-av" style={{ background: aColor(id), width: 26, height: 26, fontSize: 10 }}>
+                            {initials(m.name)}
+                          </div>
+                          <div style={{ flex: 1, fontSize: 13 }}>
+                            {m.name}
+                            {isCurrent && <span style={{ marginLeft: 6, fontSize: 10, color: "#1F94CC", fontWeight: 700 }}>← TURNO ACTUAL</span>}
+                          </div>
+                          <div className="af-turn-order-btns">
+                            <button className="af-turn-order-btn"
+                              disabled={idx === 0}
+                              onClick={() => {
+                                const next = [...turnOrder];
+                                [next[idx-1], next[idx]] = [next[idx], next[idx-1]];
+                                saveTurnOrder(next);
+                              }}>▲</button>
+                            <button className="af-turn-order-btn"
+                              disabled={idx === turnOrder.length - 1}
+                              onClick={() => {
+                                const next = [...turnOrder];
+                                [next[idx+1], next[idx]] = [next[idx], next[idx+1]];
+                                saveTurnOrder(next);
+                              }}>▼</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <button className="af-btn af-btn-s" style={{ marginTop: 8, fontSize: 12 }}
+                      onClick={() => saveTurnOrder([])}>
+                      ↺ Reiniciar orden
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Extra turn */}
             {extraHours > 0 && paymentMode !== "individual" && (
@@ -1065,35 +1187,15 @@ export default function AgilyTeam() {
                   </div>
                 )}
 
-                {/* Column headers */}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    padding: "0 12px",
-                    marginBottom: 8,
-                    alignItems: "flex-end",
-                  }}
-                >
-                  <div style={{ flex: 1 }} />
-                  <div style={{ display: "flex", gap: 5 }}>
-                    {sats.map((s) => (
-                      <div
-                        key={s}
-                        className="af-col-hdr"
-                        style={{
-                          width: 32,
-                          color: compDays[s] ? "#ff6b47" : "#6a9a6e",
-                        }}
-                      >
-                        {shortDate(s)
-                          .split(" ")
-                          .map((p, i) => (
-                            <div key={i}>{p}</div>
-                          ))}
-                      </div>
-                    ))}
-                  </div>
+                {/* Saturday dates legend */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 4px", marginBottom: 10 }}>
+                  {sats.map((s, i) => (
+                    <div key={s} style={{ fontSize: 11, color: compDays[s] ? "#ff6b47" : "#6a9a6e",
+                      background: "#131020", border: `1px solid ${compDays[s] ? "#ff6b4730" : "#241848"}`,
+                      borderRadius: 6, padding: "2px 8px", fontWeight: 700 }}>
+                      {i+1}. {shortDate(s)}
+                    </div>
+                  ))}
                 </div>
 
                 {/* Rows */}
@@ -1123,35 +1225,32 @@ export default function AgilyTeam() {
                         Mis sábados
                       </div>
                     )}
-                    <div className="af-checks">
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {sats.map((s) => {
                         const isComp = !!compDays[s];
                         const checked = !!attend[`${m.id}-${s}`];
-                        const xfer = transfers.find(
-                          (t) => t.from === m.id && t.sat === s
-                        );
+                        const xfer = transfers.find((t) => t.from === m.id && t.sat === s);
                         const canToggle = adminMode || m.id === myId;
+                        const eid = getEffective(m.id, s);
+                        const dogCount = dogs[`${eid}-${s}`] ?? 1;
                         return (
-                          <button
-                            key={s}
-                            className={`af-chk ${isComp ? "cp" : ""} ${
-                              !isComp && checked && !xfer ? "y" : ""
-                            } ${!isComp && checked && xfer ? "xfrd" : ""} ${
-                              !isComp && !canToggle ? "locked" : ""
-                            }`}
-                            onClick={() =>
-                              canToggle && !isComp && toggleAttend(m.id, s)
-                            }
-                            title={
-                              isComp
-                                ? "Competencia"
-                                : xfer && checked
-                                ? `Cedido a ${firstName(xfer.to)}`
-                                : ""
-                            }
-                          >
-                            {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
-                          </button>
+                          <div key={s} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <button
+                              className={`af-chk ${isComp ? "cp" : ""} ${!isComp && checked && !xfer ? "y" : ""} ${!isComp && checked && xfer ? "xfrd" : ""} ${!isComp && !canToggle ? "locked" : ""}`}
+                              onClick={() => canToggle && !isComp && toggleAttend(m.id, s)}
+                              title={isComp ? "Competencia" : xfer && checked ? `Cedido a ${firstName(xfer.to)}` : ""}
+                            >
+                              {isComp ? "🏆" : xfer && checked ? "↪" : checked ? "✓" : ""}
+                            </button>
+                            {checked && !isComp && (adminMode || m.id === myId) && (
+                              <div className="af-dog-toggle">
+                                <button className={`af-dog-btn ${dogCount === 1 ? "active" : ""}`}
+                                  onClick={() => setDogCount(eid, s, 1)}>🐕</button>
+                                <button className={`af-dog-btn ${dogCount === 2 ? "active" : ""}`}
+                                  onClick={() => setDogCount(eid, s, 2)}>🐕🐕</button>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
